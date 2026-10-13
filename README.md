@@ -29,7 +29,7 @@ pnpm dev
 
 Open http://localhost:3000, create a local demo account and follow the screens. Existing scenario revisions and typed answers persist after a refresh or server restart.
 
-**Lockfile note:** P0 requires a generated, committed `pnpm-lock.yaml` before frozen installations / merge. Run `pnpm install --lockfile-only` then commit the generated lockfile when starting from a fresh workspace. CI checks frozen installs. No secrets are required in CI.
+**Lockfile:** `pnpm-lock.yaml` is committed. CI should use `pnpm install --frozen-lockfile` with read-only repository permissions and no cloud secrets.
 
 ## Docker Compose
 
@@ -43,13 +43,13 @@ One container serves Next and SQLite. `interview_data` named volume is persisten
 
 ## Demo behavior
 
-Create scenario from JD → revise and explicitly approve the latest immutable version → set AI spoken language and voice independently of candidate input/STT language → explicitly consent to storing transcript → Start → answer by text → pause/resume/end → inspect history/events. The preflight mic and voice preview are *mock buttons*; neither asks browser permission nor records audio. Typed answers are durable and requests have idempotency keys.
+Create scenario from JD → revise and explicitly approve the latest immutable version → set AI spoken language and voice independently of candidate input/STT language → explicitly consent to storing transcript → Start → answer by text → pause/resume/end → inspect history/events. The preflight mic and voice preview are *mock buttons*; neither asks browser permission nor records audio. Typed answers are durable and requests have idempotency keys; reusing a key with a different answer returns HTTP 409. P0 emits `preflight.demo_skipped` instead of claiming a real microphone check passed. Scripted interviewer question text respects the selected language (English or Vietnamese), while the candidate input locale remains independent. Each demo session accepts at most 15 answers.
 
 **No AI/voice guarantee**: P1 adds CV parsing and real LLM scenario generation; P2 adds Azure Speech browser STT/TTS, preflight hardware checks and durable voice turns; P3 adds adaptive questioning and hints; P4 adds evidence-scored reports and external audit ZIP. These later phases require the applicable third-party credentials/billing.
 
 ## Privacy and security
 
-Your self-hosted operator manages database backups and retention. Better Auth enforces local account login, and demo API endpoints verify server-side ownership. Transcript consent starts **unchecked**. Raw audio is off. Demo service does not receive CV binary and does not upload audio to Azure. Run public deployments behind TLS and set a unique strong secret; avoid sharing `.env`, databases, transcripts or CVs.
+Your self-hosted operator manages database backups and retention. P0 does not implement automated retention, a deletion UI or a `RETENTION_DAYS` setting. Better Auth enforces local account login, and demo API endpoints verify server-side ownership. Transcript consent starts **unchecked**. Raw audio is off. Demo service does not receive CV binary and does not upload audio to Azure. Run public deployments behind TLS and set a unique strong secret; avoid sharing `.env`, databases, transcripts or CVs.
 
 ## Open source / contributing
 
