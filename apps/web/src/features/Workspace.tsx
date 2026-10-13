@@ -221,6 +221,7 @@ export default function Workspace({userEmail}:{userEmail:string}) {
             <h3>Scenario stages (deterministic demo)</h3><ol><li>Background and prior projects</li><li>Production troubleshooting</li><li>System design and trade-offs</li><li>Wrap-up</li></ol>
             <p><b>Source JD:</b> {scenario.jobDescription}</p>
             <p className="muted">Previous approved revisions remain immutable after edits.</p>
+            <button className="btn secondary" onClick={()=>{setScenario(null);setConsent(false);}}>Browse scenarios</button>
             <button className="btn primary" disabled={busy} onClick={()=>changeScenario("approve")}>{approved?"Continue to preflight":"✓ Approve latest revision"}</button>
           </div><div className="panel"><h2>Planner revision chat (demo)</h2>
             {scenario.revisions.map(r=><p key={r.revision} className="chat-bubble">v{r.revision}: {r.notes} {r.approvedAt?"✓ approved":""}</p>)}
