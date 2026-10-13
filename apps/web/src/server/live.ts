@@ -4,7 +4,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { DomainError, maxDemoTurns, validateSpeechConfig } from "@interview/core";
 import { db } from "./db/client";
-import { interviewSessions,interviewTurns,liveHints,liveQuestions,scenarioPlans,scenarioRevisions,scenarios,workflowEvents } from "./db/schema";
+import { interviewSessions,interviewTurns,liveHints,liveQuestions,scenarioPlans,scenarios,workflowEvents } from "./db/schema";
 import { changeScenario,createScenario,createSession,getScenario,getSession } from "./demo";
 import {hintSchema,liveConfigured,nextInterviewQuestion,planScenario,planSchema,proposeHint,promptVersion,revisePlan} from "./ai";
 

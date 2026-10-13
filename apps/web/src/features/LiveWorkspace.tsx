@@ -1,5 +1,6 @@
 "use client";
 import {useEffect,useRef,useState} from "react";
+import Link from "next/link";
 import {voiceByLocale} from "@interview/core";
 import {checkMicrophone,checkSpeaker,listen,say,type SpeechCredential} from "./azure-client";
 import {extractPdf} from "./pdf-client";
@@ -200,7 +201,7 @@ export default function LiveWorkspace({email}:{email:string}){
    <nav aria-label="Interview steps">
     {(["prepare","review","preflight","meeting","results"] as const).map((x,i)=>
      <button key={x} className={step===x?"active":""} onClick={()=>setStep(x)}>{i+1}. {x}</button>)}
-    <a href="/" style={{color:"white",padding:14}}>← Offline P0 demo</a>
+    <Link href="/" style={{color:"white",padding:14}}>← Offline P0 demo</Link>
    </nav><div className="sidebar-bottom">AI responses require your own model key. Azure speech requires your own Azure resource.</div>
   </aside><div className="main-area">
    <header className="topbar"><span className="eyebrow">LIVE AI MOCK INTERVIEW</span><small>{email}</small></header>
