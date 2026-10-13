@@ -33,11 +33,18 @@ test("concurrent AI creation is charged once, demo cannot revise live plan, list
  const plan=await page.request.get("/api/live/scenarios/"+created.id);
  expect(plan.status()).toBe(200);
  expect((await plan.json()).scenario.latestRevision).toBe(1);
+ const beforeRevise=await counts(page);
+ const revisions=await Promise.all(Array.from({length:5},()=>
+  page.request.post("/api/live/scenarios/"+created.id+"/revise",{
+   data:{feedback:"Focus on measurable database reliability",expectedRevision:1}})));
+ expect(revisions.filter(r=>r.status()===200).length).toBe(1);
+ expect(revisions.filter(r=>r.status()===409).length).toBe(4);
+ expect((await counts(page)).revise-beforeRevise.revise).toBe(1);
  const approval=await page.request.patch("/api/demo/scenarios/"+created.id,{
-  data:{action:"approve",expectedRevision:1}});
+  data:{action:"approve",expectedRevision:2}});
  expect(approval.status()).toBe(200);
  const started=await page.request.post("/api/live/sessions",{
-  data:{scenarioId:created.id,revision:1,requestKey:randomUUID(),speech}});
+  data:{scenarioId:created.id,revision:2,requestKey:randomUUID(),speech}});
  expect(started.status()).toBe(201);
  const session=await started.json() as {id:string};
  const listing=await (await page.request.get("/api/demo/sessions?limit=50")).json() as {items:{id:string;mode:string}[]};
