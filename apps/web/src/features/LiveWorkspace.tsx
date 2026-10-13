@@ -110,6 +110,24 @@ export default function LiveWorkspace({email}:{email:string}){
   setSession(next);setHint("");setRecognized("");setAnswer("");answerKey.current=null;
   return next;
  }
+ async function previewSelectedVoice(){
+  await run(async()=>{
+   const response=await fetch("/api/live/speech/preview",{
+    method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({interviewerLocale,voiceId:voice})
+   });
+   if(!response.ok)throw new Error("Could not preview voice; verify Azure Speech configuration");
+   const source=URL.createObjectURL(await response.blob());
+   try{
+    const sound=new Audio(source);
+    await sound.play();
+    await new Promise<void>((resolve,reject)=>{
+     sound.onended=()=>resolve();sound.onerror=()=>reject(new Error("Audio playback failed"));
+    });
+    setMessage("Azure voice preview played successfully.");
+   }finally{URL.revokeObjectURL(source);}
+  });
+ }
  async function start(){
   if(!scenario||!approved||!consent)return;
   await run(async()=>{
@@ -248,6 +266,8 @@ export default function LiveWorkspace({email}:{email:string}){
        {locales.map(l=><option key={l.key} value={l.key}>{l.label}</option>)}</select></label>
       <label>AI interviewer voice<select value={voice} onChange={e=>setVoice(e.target.value)}>
        {visibleVoices.map(v=><option key={v} value={v}>{v}</option>)}</select></label>
+      <button className="btn secondary" type="button" disabled={busy||!catalog?.enabled||!visibleVoices.includes(voice)}
+        onClick={previewSelectedVoice}>▶ Preview interviewer voice (Azure)</button>
       <label>Your spoken input language<select value={candidateLocale} onChange={e=>setCandidateLocale(e.target.value as Locale)}>
        {locales.map(l=><option key={l.key} value={l.key}>{l.label}</option>)}</select></label>
       <label className="check"><input type="checkbox" checked={textOnly} onChange={e=>setTextOnly(e.target.checked)}/>
@@ -263,7 +283,7 @@ export default function LiveWorkspace({email}:{email:string}){
         Test microphone {micOk?"✓":""}</button>
        <button className="btn secondary" disabled={busy} onClick={()=>run(async()=>{await checkSpeaker();setSpeakerOk(true);setMessage("Local speaker tone played.");})}>
         Test speaker {speakerOk?"✓":""}</button>
-       <p className="muted small">Voice preview becomes available in the live meeting after a short-lived Azure token is issued. Tests are real device checks, not demo passes.</p>
+       <p className="muted small">Voice preview is synthesized by Azure from a fixed sample phrase. Microphone and speaker tests are real hardware checks, not demo passes.</p>
       </section></div>}
     {step==="meeting"&&<div className="meeting-layout"><section>
       <div className="meeting-video"><div className="avatar">👩🏻‍💼</div><strong>AI Interviewer · {session?.state}</strong>

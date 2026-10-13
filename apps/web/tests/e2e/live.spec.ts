@@ -6,6 +6,7 @@ test("live API denies unauthenticated model calls and speech tokens",async({requ
  expect(create.status()).toBe(401);
  expect((await request.post("/api/live/sessions/00000000-0000-4000-8000-000000000000/question")).status()).toBe(401);
  expect((await request.get("/api/live/speech/voices")).status()).toBe(401);
+ expect((await request.post("/api/live/speech/preview",{data:{interviewerLocale:"en-US",voiceId:"en-US-JennyNeural"}})).status()).toBe(401);
  expect((await request.post("/api/live/speech/token",{data:{sessionId:"00000000-0000-4000-8000-000000000000"}})).status()).toBe(401);
 });
 test("live page requires authentication",async({page})=>{
