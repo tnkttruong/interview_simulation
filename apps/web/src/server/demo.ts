@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { getDemoQuestion, transition, validateSpeechConfig, type SessionState } from "@interview/core";
+import { getDemoQuestion, maxDemoTurns, transition, validateSpeechConfig, type SessionState } from "@interview/core";
 import { db } from "./db/client";
 import { interviewSessions, interviewTurns, scenarioRevisions, scenarios, workflowEvents } from "./db/schema";
 
@@ -21,8 +21,9 @@ const startInput = z.object({
 const answerInput = z.object({
   clientTurnId: z.string().uuid(),
   answer: z.string().trim().min(1).max(12000),
-  source: z.enum(["typed", "recognized", "corrected"]).default("typed"),
-  originalStt: z.string().max(12000).nullable().optional(),
+  // P0 does not expose a trusted STT provider. Validate provenance with provider evidence in P2.
+  source: z.literal("typed").default("typed"),
+  originalStt: z.never().optional(),
 });
 type UserId = string;
 
@@ -96,8 +97,10 @@ export function getSession(ownerId:UserId, id:string) {
   const turns = db.select().from(interviewTurns).where(eq(interviewTurns.sessionId,id))
     .orderBy(interviewTurns.sequence).all();
   const scenario = requireOwnedScenario(ownerId,session.scenarioId);
+  const speech = validateSpeechConfig(JSON.parse(session.speechConfig));
   return { ...session, scenario: { role: scenario.role, focus: scenario.focus }, turns,
-    nextQuestion: session.state === "IN_PROGRESS" ? getDemoQuestion(turns.length) : null };
+    nextQuestion: session.state === "IN_PROGRESS" && turns.length < maxDemoTurns
+      ? getDemoQuestion(turns.length, speech.interviewerLocale) : null };
 }
 export function createSession(ownerId: UserId, payload: unknown) {
   const input = startInput.parse(payload);
@@ -122,7 +125,7 @@ export function createSession(ownerId: UserId, payload: unknown) {
     tx.insert(interviewSessions).values(record).run();
     addEvent(tx,record.id,"session.created",{scenarioRevision:input.revision});
     let state: SessionState = "CREATED";
-    for (const [action,type] of [["enterPreflight","preflight.entered"],["passPreflight","preflight.passed"],["start","interview.started"]] as const) {
+    for (const [action,type] of [["enterPreflight","preflight.entered"],["skipDemoPreflight","preflight.demo_skipped"],["start","interview.started"]] as const) {
       state = transition(state,action);
       addEvent(tx,record.id,type,{mode:"demo"});
     }
@@ -138,16 +141,22 @@ export function submitAnswer(ownerId: UserId, id: string, payload: unknown) {
     if (!session) throw new Error("Session not found");
     const existing = tx.select().from(interviewTurns)
       .where(and(eq(interviewTurns.sessionId,id),eq(interviewTurns.clientTurnId,input.clientTurnId))).get();
-    if (existing) return getSession(ownerId,id);
+    if (existing) {
+      // The idempotency key is bound to the normalized command, not just the turn ID.
+      if (existing.answer !== input.answer || existing.answerSource !== input.source || existing.originalStt !== null)
+        throw new Error("Answer request key conflict");
+      return getSession(ownerId,id);
+    }
     if (session.state !== "IN_PROGRESS") throw new Error("Session is not accepting answers");
     const last = tx.select({ sequence: interviewTurns.sequence }).from(interviewTurns)
       .where(eq(interviewTurns.sessionId,id)).orderBy(desc(interviewTurns.sequence)).limit(1).get();
     const sequence = (last?.sequence ?? 0) + 1;
-    if (sequence > 15) throw new Error("Demo turn limit reached");
+    if (sequence > maxDemoTurns) throw new Error("Demo turn limit reached");
+    const speech = validateSpeechConfig(JSON.parse(session.speechConfig));
     tx.insert(interviewTurns).values({
       id:randomUUID(), sessionId:id, clientTurnId:input.clientTurnId, sequence,
-      question:getDemoQuestion(sequence-1), answer:input.answer, answerSource:input.source,
-      originalStt:input.originalStt ?? null, createdAt:now()
+      question:getDemoQuestion(sequence-1, speech.interviewerLocale), answer:input.answer, answerSource:input.source,
+      originalStt:null, createdAt:now()
     }).run();
     addEvent(tx,id,"answer.committed",{sequence,source:input.source});
     return getSession(ownerId,id);
