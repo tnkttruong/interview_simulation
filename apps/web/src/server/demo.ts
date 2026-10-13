@@ -118,14 +118,15 @@ export function changeScenario(ownerId: UserId, id: string, payload: unknown, pl
     return getScenario(ownerId,id);
   });
 }
-export function listSessions(ownerId: UserId, limit: number, offset: number) {
+export function listSessions(ownerId: UserId, limit: number, offset: number, mode?: "live" | "demo") {
+  const filter=mode?and(eq(interviewSessions.ownerId,ownerId),eq(interviewSessions.mode,mode)):eq(interviewSessions.ownerId,ownerId);
   const total = db.select({value:count()}).from(interviewSessions)
-    .where(eq(interviewSessions.ownerId,ownerId)).get()!.value;
+    .where(filter).get()!.value;
   const items = db.select({ id: interviewSessions.id, state: interviewSessions.state, version: interviewSessions.version,
     scenarioId: interviewSessions.scenarioId, scenarioRevision: interviewSessions.scenarioRevision,
     mode: interviewSessions.mode,
     createdAt: interviewSessions.createdAt, speechConfig: interviewSessions.speechConfig })
-    .from(interviewSessions).where(eq(interviewSessions.ownerId,ownerId))
+    .from(interviewSessions).where(filter)
     .orderBy(desc(interviewSessions.createdAt),desc(interviewSessions.id)).limit(limit).offset(offset).all();
   return {items,total,nextOffset:offset+items.length<total?offset+items.length:null};
 }
