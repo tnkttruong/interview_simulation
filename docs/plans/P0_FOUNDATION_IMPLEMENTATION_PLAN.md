@@ -1,6 +1,6 @@
 # P0 — Open-Source Foundation & UI-First Implementation Plan
 
-**Status:** IMPLEMENTATION PROPOSAL (P0 planning, not completed application)
+**Status:** P0 executable foundation delivered in PR #1; unchecked items below remain roadmap/gaps, not completed claims
 **Date:** 2026-10-13
 **Repository:** https://github.com/tnkttruong/interview_simulation
 **Architecture baseline:** [Technical Architecture](../TECHNICAL_ARCHITECTURE.md) (same PR)
