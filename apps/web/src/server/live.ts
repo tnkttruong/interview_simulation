@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, gte } from "drizzle-orm";
 import { z } from "zod";
 import { DomainError, maxDemoTurns, validateSpeechConfig } from "@interview/core";
 import { db } from "./db/client";
@@ -29,6 +29,11 @@ function event(tx:typeof db,sessionId:string,type:string,metadata:Record<string,
 }
 export async function createLiveScenario(ownerId:string,payload:unknown){
  const input=created.parse(payload);
+ // Check before invoking billable AI; createScenario rechecks inside its transaction.
+ const total=db.select({n:count()}).from(scenarios).where(eq(scenarios.ownerId,ownerId)).get()!.n;
+ const recent=db.select({n:count()}).from(scenarios).where(and(eq(scenarios.ownerId,ownerId),
+  gte(scenarios.createdAt,Date.now()-3600000))).get()!.n;
+ if(total>=100||recent>=12)throw new DomainError("limit","Scenario creation quota reached");
  const generated=await planScenario(input.role,input.jobDescription,input.cvText,input.focus);
  const scenario=createScenario(ownerId,{role:input.role,jobDescription:input.jobDescription,focus:input.focus});
  db.insert(scenarioPlans).values({scenarioId:scenario.id,revision:1,cvText:input.cvText,
@@ -39,6 +44,7 @@ export async function reviseLiveScenario(ownerId:string,id:string,payload:unknow
  const input=instruction.parse(payload);
  const scenario=getScenario(ownerId,id);
  if(scenario.latestRevision!==input.expectedRevision)throw new DomainError("conflict","Scenario revision conflict");
+ if(scenario.latestRevision>=20)throw new DomainError("limit","Scenario revision limit reached");
  const previous=planFor(id,scenario.latestRevision);
  const generated=await revisePlan(previous.plan,input.feedback,scenario.jobDescription,previous.row.cvText);
  // CAS is rechecked by changeScenario after the slow LLM call.
@@ -83,7 +89,7 @@ export async function prepareLiveQuestion(ownerId:string,id:string){
   tx.insert(liveQuestions).values({id:randomUUID(),sessionId:id,sequence,
     question:generated.output.question,competency:generated.output.competency,
     modelId:generated.modelId,promptVersion,createdAt:Date.now()}).run();
-  event(tx as typeof db,id,"question.prepared",{sequence,modelId:generated.modelId,promptVersion});
+  event(tx as unknown as typeof db,id,"question.prepared",{sequence,modelId:generated.modelId,promptVersion});
  });
  return getSession(ownerId,id);
 }
@@ -107,7 +113,7 @@ export async function exposeHint(ownerId:string,id:string){
   if(!already){
    tx.insert(liveHints).values({id:randomUUID(),sessionId:id,sequence,hint:generated.output.hint,
      modelId:generated.modelId,createdAt:Date.now()}).run();
-   event(tx as typeof db,id,"hint.exposed",{sequence,modelId:generated.modelId});
+   event(tx as unknown as typeof db,id,"hint.exposed",{sequence,modelId:generated.modelId});
   }
  });
  const persisted=db.select().from(liveHints).where(and(eq(liveHints.sessionId,id),eq(liveHints.sequence,sequence))).get()!;
