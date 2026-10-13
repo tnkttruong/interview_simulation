@@ -38,7 +38,7 @@ export async function withAiBudget<T>(ownerId:string,operation:unknown,work:()=>
   if(duplicate)throw new DomainError("conflict","Duplicate AI request in cooldown");
   tx.insert(aiCallAttempts).values({id,ownerId,operationKey:key,status:"running",
    startedAt:started,expiresAt:started+LEASE_MS,finishedAt:null}).run();
- })();
+ });
  let success=false;
  try{
   const result=await work();
