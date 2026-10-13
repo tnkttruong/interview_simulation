@@ -54,3 +54,21 @@ Your self-hosted operator manages database backups and retention. There is no au
 ## Open source / contributing
 
 Licensed under [Apache-2.0](LICENSE). Feature contributions and tests are welcome; read [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). Core code is open source, but real AI/voice providers have separate credentials, prices and terms.
+
+## AI provider and language preferences
+
+Sign in and open **/settings**. This account-owned page stores an AI provider, model, default interviewer language/voice, and default candidate speech language in SQLite. Saved preferences drive live scenario planning, revisions, questions and hints. The meeting preflight initializes the saved language/voice defaults; you can override them per meeting. The offline P0 demo does not call AI.
+
+### CLI-first, operator opt-in
+
+Set `ENABLE_LOCAL_AI_CLI=true` on a trusted self-hosted installation. Install and authenticate `codex` and/or `agy` as the OS user running Next.js. New accounts default to Codex when available, then Agy. The Codex list follows `auto-dev-workflow/packages/adapters/codex-local/src/index.ts`. Agy models are discovered from the installed CLI with a documented fallback. Model names can also be entered manually.
+
+Codex is invoked with `codex exec --json --sandbox read-only --skip-git-repo-check`, and Agy uses `--input-format stream-json --output-format stream-json --sandbox`, both with user data on stdin, no shell, temporary working directory, bounded output and a 90-second timeout. Availability checks verify installation, **not** authentication. The Docker image does not bundle or authenticate Codex/Agy, so build a private runtime image if CLI support is needed.
+
+**Security:** CLI processes run with the server operating-system account's permissions and shared host login. Do not enable this mode for publicly accessible self-registration. Isolate the host account/container and network access; CLI sandbox controls are defense in depth rather than per-user isolation. Web app secrets are omitted from subprocess environments.
+
+### Existing API-key provider
+
+The server-side `OPENAI_API_KEY`, `AI_MODEL` and optional `LLM_BASE_URL` path remains supported. Select **API key** in Settings to use it; account settings can override the default model. Keys are not read or stored by the browser or SQLite. **TODO:** secure per-account API-key management through this settings page; this PR deliberately keeps the existing server environment approach.
+
+CLI auth with real accounts and Azure voice remain external smoke-test requirements.
