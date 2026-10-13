@@ -182,7 +182,7 @@ export default function Workspace({userEmail}:{userEmail:string}) {
       <div className="brand">◉ <strong>Interview<br/>Simulation</strong></div>
       <div className="side-caption">OPEN-SOURCE · P0 DEMO</div>
       <nav aria-label="Main navigation">{labels.map(([name,label])=>
-        <button key={name} className={screen===name?"active":""} onClick={()=>{setError("");if(name==="scenario"||name==="new"){setScenario(null);setConsent(false);}setScreen(name);}}>{label}</button>)}</nav>
+        <button key={name} className={screen===name?"active":""} onClick={()=>{setError("");if(name==="new"){setScenario(null);setConsent(false);}setScreen(name);}}>{label}</button>)}</nav>
       <div className="sidebar-bottom"><small>Offline mock prompts. No STT, TTS or LLM calls.</small></div>
     </aside>
     <div className="main-area">
