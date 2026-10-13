@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, gte } from "drizzle-orm";
 import { z } from "zod";
 import { getDemoQuestion, maxDemoTurns, transition, validateSpeechConfig, type SessionState } from "@interview/core";
 import { db } from "./db/client";
@@ -20,12 +20,23 @@ const startInput = z.object({
 });
 const answerInput = z.object({
   clientTurnId: z.string().uuid(),
+  expectedTurnSequence: z.number().int().min(1).max(maxDemoTurns),
   answer: z.string().trim().min(1).max(12000),
   // P0 does not expose a trusted STT provider. Validate provenance with provider evidence in P2.
   source: z.literal("typed").default("typed"),
   originalStt: z.never().optional(),
 });
 type UserId = string;
+const HOUR_MS = 3600000;
+const MAX_SCENARIOS_PER_HOUR = 12;
+const MAX_SCENARIOS_PER_OWNER = 100;
+const MAX_SESSIONS_PER_HOUR = 30;
+const MAX_SESSIONS_PER_OWNER = 300;
+function requireCreationCapacity(total: number, recent: number, maxTotal: number, maxHourly: number) {
+  if (total >= maxTotal) throw new Error("Account storage quota reached");
+  if (recent >= maxHourly) throw new Error("Hourly creation limit reached");
+}
+
 
 function addEvent(tx: Pick<typeof db, "select" | "insert">, sessionId: string, type: string, metadata: Record<string, unknown> = {}) {
   const previous = tx.select({ seq: workflowEvents.seq }).from(workflowEvents)
@@ -47,12 +58,21 @@ function requireOwnedSession(ownerId: UserId, sessionId: string) {
   if (!row) throw new Error("Session not found");
   return row;
 }
-export function listScenarios(ownerId: UserId) {
-  return db.select().from(scenarios).where(eq(scenarios.ownerId, ownerId)).orderBy(desc(scenarios.createdAt)).all();
+export function listScenarios(ownerId: UserId, limit: number, offset: number) {
+  const total = db.select({ value: count() }).from(scenarios).where(eq(scenarios.ownerId, ownerId)).get()!.value;
+  const items = db.select({ id: scenarios.id, role: scenarios.role, focus: scenarios.focus,
+    latestRevision: scenarios.latestRevision, createdAt: scenarios.createdAt })
+    .from(scenarios).where(eq(scenarios.ownerId, ownerId))
+    .orderBy(desc(scenarios.createdAt), desc(scenarios.id)).limit(limit).offset(offset).all();
+  return { items, total, nextOffset: offset + items.length < total ? offset + items.length : null };
 }
 export function createScenario(ownerId: UserId, payload: unknown) {
   const input = scenarioInput.parse(payload);
   return db.transaction((tx) => {
+    const total = tx.select({ value: count() }).from(scenarios).where(eq(scenarios.ownerId, ownerId)).get()!.value;
+    const recent = tx.select({ value: count() }).from(scenarios).where(and(eq(scenarios.ownerId, ownerId),
+      gte(scenarios.createdAt, now() - HOUR_MS))).get()!.value;
+    requireCreationCapacity(total, recent, MAX_SCENARIOS_PER_OWNER, MAX_SCENARIOS_PER_HOUR);
     const scenario = { id: randomUUID(), ownerId, ...input, latestRevision: 1, createdAt: now() };
     tx.insert(scenarios).values(scenario).run();
     tx.insert(scenarioRevisions).values({ scenarioId: scenario.id, revision: 1, notes: "Initial demo scenario", approvedAt: null }).run();
@@ -86,11 +106,15 @@ export function changeScenario(ownerId: UserId, id: string, payload: unknown) {
     return getScenario(ownerId,id);
   });
 }
-export function listSessions(ownerId: UserId) {
-  return db.select({ id: interviewSessions.id, state: interviewSessions.state, version: interviewSessions.version,
+export function listSessions(ownerId: UserId, limit: number, offset: number) {
+  const total = db.select({value:count()}).from(interviewSessions)
+    .where(eq(interviewSessions.ownerId,ownerId)).get()!.value;
+  const items = db.select({ id: interviewSessions.id, state: interviewSessions.state, version: interviewSessions.version,
     scenarioId: interviewSessions.scenarioId, scenarioRevision: interviewSessions.scenarioRevision,
     createdAt: interviewSessions.createdAt, speechConfig: interviewSessions.speechConfig })
-    .from(interviewSessions).where(eq(interviewSessions.ownerId,ownerId)).orderBy(desc(interviewSessions.createdAt)).all();
+    .from(interviewSessions).where(eq(interviewSessions.ownerId,ownerId))
+    .orderBy(desc(interviewSessions.createdAt),desc(interviewSessions.id)).limit(limit).offset(offset).all();
+  return {items,total,nextOffset:offset+items.length<total?offset+items.length:null};
 }
 export function getSession(ownerId:UserId, id:string) {
   const session = requireOwnedSession(ownerId,id);
@@ -113,6 +137,11 @@ export function createSession(ownerId: UserId, payload: unknown) {
           existing.speechConfig !== JSON.stringify(speech)) throw new Error("Request key conflict");
       return getSession(ownerId,existing.id);
     }
+    const total = tx.select({value:count()}).from(interviewSessions)
+      .where(eq(interviewSessions.ownerId,ownerId)).get()!.value;
+    const recent = tx.select({value:count()}).from(interviewSessions).where(and(eq(interviewSessions.ownerId,ownerId),
+      gte(interviewSessions.createdAt,now()-HOUR_MS))).get()!.value;
+    requireCreationCapacity(total,recent,MAX_SESSIONS_PER_OWNER,MAX_SESSIONS_PER_HOUR);
     const scenario = tx.select().from(scenarios).where(and(eq(scenarios.id,input.scenarioId),eq(scenarios.ownerId,ownerId))).get();
     if (!scenario || scenario.latestRevision !== input.revision) throw new Error("Latest scenario revision required");
     const approved = tx.select().from(scenarioRevisions).where(and(
@@ -143,7 +172,7 @@ export function submitAnswer(ownerId: UserId, id: string, payload: unknown) {
       .where(and(eq(interviewTurns.sessionId,id),eq(interviewTurns.clientTurnId,input.clientTurnId))).get();
     if (existing) {
       // The idempotency key is bound to the normalized command, not just the turn ID.
-      if (existing.answer !== input.answer || existing.answerSource !== input.source || existing.originalStt !== null)
+      if (existing.answer !== input.answer || existing.answerSource !== input.source || existing.originalStt !== null || existing.sequence !== input.expectedTurnSequence)
         throw new Error("Answer request key conflict");
       return getSession(ownerId,id);
     }
@@ -152,6 +181,7 @@ export function submitAnswer(ownerId: UserId, id: string, payload: unknown) {
       .where(eq(interviewTurns.sessionId,id)).orderBy(desc(interviewTurns.sequence)).limit(1).get();
     const sequence = (last?.sequence ?? 0) + 1;
     if (sequence > maxDemoTurns) throw new Error("Demo turn limit reached");
+    if (sequence !== input.expectedTurnSequence) throw new Error("Stale question conflict");
     const speech = validateSpeechConfig(JSON.parse(session.speechConfig));
     tx.insert(interviewTurns).values({
       id:randomUUID(), sessionId:id, clientTurnId:input.clientTurnId, sequence,
