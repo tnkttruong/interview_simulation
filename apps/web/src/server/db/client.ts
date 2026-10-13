@@ -1,0 +1,14 @@
+import "server-only";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import * as schema from "./schema";
+import { getConfig } from "../config";
+const path = getConfig().databaseFile;
+mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+export const sqlite = new Database(path);
+sqlite.pragma("journal_mode = WAL");
+sqlite.pragma("busy_timeout = 5000");
+sqlite.pragma("foreign_keys = ON");
+export const db = drizzle(sqlite, { schema });
