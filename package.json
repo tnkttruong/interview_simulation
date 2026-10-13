@@ -16,7 +16,7 @@
     "test:e2e": "pnpm --filter @interview/web test:e2e",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "db:generate": "pnpm --filter @interview/web db:generate",
-    "db:migrate": "node scripts/migrate.mjs"
+    "db:migrate": "pnpm --filter @interview/web db:migrate"
   },
   "devDependencies": {
     "typescript": "^5.9.0"

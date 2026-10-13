@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node --env-file-if-exists=../../.env scripts/migrate.mjs"
   },
   "dependencies": {
     "@interview/core": "workspace:*",
@@ -22,7 +23,8 @@
     "pino": "^10.0.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "zod": "^3.25.0"
+    "zod": "^3.25.0",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.0",
@@ -36,6 +38,8 @@
     "@playwright/test": "^1.56.0",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.9.0",
-    "vitest": "^3.2.0"
+    "vitest": "^3.2.0",
+    "@eslint/eslintrc": "^3.3.0",
+    "@next/env": "^15.5.0"
   }
 }

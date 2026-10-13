@@ -11,6 +11,6 @@ export function getConfig() {
     demoMode,
     secret,
     appURL: process.env.APP_URL ?? "http://localhost:3000",
-    databaseFile: resolve(process.cwd(), process.env.DATABASE_URL ?? "../../data/interview.db")
+    databaseFile: resolve(process.env.APP_ROOT_DIR ?? resolve(process.cwd(), "../.."), process.env.DATABASE_URL ?? "data/interview.db")
   };
 }
