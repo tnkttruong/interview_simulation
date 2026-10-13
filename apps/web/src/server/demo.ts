@@ -4,7 +4,7 @@ import { and, count, desc, eq, gte } from "drizzle-orm";
 import { z } from "zod";
 import { DomainError, getDemoQuestion, maxDemoTurns, transition, validateSpeechConfig, type SessionState } from "@interview/core";
 import { db } from "./db/client";
-import { interviewSessions, interviewTurns, scenarioRevisions, scenarios, workflowEvents } from "./db/schema";
+import { interviewSessions, interviewTurns, liveQuestions, scenarioRevisions, scenarios, workflowEvents } from "./db/schema";
 
 const now = () => Date.now();
 const scenarioInput = z.object({
@@ -17,14 +17,16 @@ const startInput = z.object({
   revision: z.number().int().positive(),
   requestKey: z.string().uuid(),
   speech: z.unknown(),
+  mode: z.enum(["demo","live"]).default("demo"),
 });
 const answerInput = z.object({
   clientTurnId: z.string().uuid(),
   expectedTurnSequence: z.number().int().min(1).max(maxDemoTurns),
   answer: z.string().trim().min(1).max(12000),
   // P0 does not expose a trusted STT provider. Validate provenance with provider evidence in P2.
-  source: z.literal("typed").default("typed"),
-  originalStt: z.never().optional(),
+  source: z.enum(["typed","client_stt","corrected"]).default("typed"),
+  originalStt: z.string().trim().max(12000).optional(),
+  expectedQuestionId: z.string().uuid().optional(),
 });
 type UserId = string;
 const HOUR_MS = 3600000;
@@ -125,9 +127,13 @@ export function getSession(ownerId:UserId, id:string) {
     .orderBy(interviewTurns.sequence).all();
   const scenario = requireOwnedScenario(ownerId,session.scenarioId);
   const speech = validateSpeechConfig(JSON.parse(session.speechConfig));
+  const upcoming = session.mode === "live" && session.state === "IN_PROGRESS"
+    ? db.select().from(liveQuestions).where(and(eq(liveQuestions.sessionId,id),eq(liveQuestions.sequence,turns.length+1))).get()
+    : null;
   return { ...session, scenario: { role: scenario.role, focus: scenario.focus }, turns,
+    nextQuestionId: upcoming?.id ?? null,
     nextQuestion: session.state === "IN_PROGRESS" && turns.length < maxDemoTurns
-      ? getDemoQuestion(turns.length, speech.interviewerLocale) : null };
+      ? (session.mode === "live" ? upcoming?.question ?? null : getDemoQuestion(turns.length, speech.interviewerLocale)) : null };
 }
 export function createSession(ownerId: UserId, payload: unknown) {
   const input = startInput.parse(payload);
@@ -137,7 +143,7 @@ export function createSession(ownerId: UserId, payload: unknown) {
       .where(and(eq(interviewSessions.ownerId,ownerId),eq(interviewSessions.requestKey,input.requestKey))).get();
     if (existing) {
       if (existing.scenarioId !== input.scenarioId || existing.scenarioRevision !== input.revision ||
-          existing.speechConfig !== JSON.stringify(speech)) throw new DomainError("conflict", "Request key conflict");
+          existing.speechConfig !== JSON.stringify(speech) || existing.mode !== input.mode) throw new DomainError("conflict", "Request key conflict");
       return getSession(ownerId,existing.id);
     }
     const total = tx.select({value:count()}).from(interviewSessions)
@@ -152,13 +158,13 @@ export function createSession(ownerId: UserId, payload: unknown) {
     )).get();
     if (!approved?.approvedAt) throw new DomainError("invalid", "Scenario approval required");
     const record = { id:randomUUID(), ownerId, scenarioId:scenario.id, scenarioRevision:input.revision,
-      requestKey:input.requestKey, speechConfig:JSON.stringify(speech),
+      requestKey:input.requestKey, speechConfig:JSON.stringify(speech), mode:input.mode,
       state:"CREATED", version:1, createdAt:now() };
     tx.insert(interviewSessions).values(record).run();
-    addEvent(tx,record.id,"session.created",{scenarioRevision:input.revision});
+    addEvent(tx,record.id,"session.created",{scenarioRevision:input.revision,mode:input.mode});
     let state: SessionState = "CREATED";
     let version = 1;
-    for (const [action,type] of [["enterPreflight","preflight.entered"],["skipDemoPreflight","preflight.demo_skipped"],["start","interview.started"]] as const) {
+    for (const [action,type] of [["enterPreflight","preflight.entered"],["skipDemoPreflight",input.mode==="live"?"preflight.client_reported":"preflight.demo_skipped"],["start","interview.started"]] as const) {
       state = transition(state,action);
       version += 1;
       addEvent(tx,record.id,type,{mode:"demo"});
@@ -177,7 +183,7 @@ export function submitAnswer(ownerId: UserId, id: string, payload: unknown) {
       .where(and(eq(interviewTurns.sessionId,id),eq(interviewTurns.clientTurnId,input.clientTurnId))).get();
     if (existing) {
       // The idempotency key is bound to the normalized command, not just the turn ID.
-      if (existing.answer !== input.answer || existing.answerSource !== input.source || existing.originalStt !== null || existing.sequence !== input.expectedTurnSequence)
+      if (existing.answer !== input.answer || existing.answerSource !== input.source || existing.originalStt !== (input.originalStt??null) || existing.sequence !== input.expectedTurnSequence)
         throw new DomainError("conflict", "Answer request key conflict");
       return getSession(ownerId,id);
     }
@@ -187,13 +193,22 @@ export function submitAnswer(ownerId: UserId, id: string, payload: unknown) {
     const sequence = (last?.sequence ?? 0) + 1;
     if (sequence > maxDemoTurns) throw new DomainError("invalid", "Demo turn limit reached");
     if (sequence !== input.expectedTurnSequence) throw new DomainError("conflict", "Stale question conflict");
+    if(session.mode==="demo" && (input.source!=="typed" || input.originalStt!==undefined || input.expectedQuestionId!==undefined))
+      throw new DomainError("invalid","Demo only accepts typed answers");
+    if(session.mode==="live" && input.source==="corrected" && !input.originalStt)
+      throw new DomainError("invalid","Correction requires original speech text");
     const speech = validateSpeechConfig(JSON.parse(session.speechConfig));
+    const activeQuestion = session.mode==="live"
+      ? tx.select().from(liveQuestions).where(and(eq(liveQuestions.sessionId,id),eq(liveQuestions.sequence,sequence))).get()
+      : null;
+    if(session.mode==="live" && (!activeQuestion || activeQuestion.id!==input.expectedQuestionId))
+      throw new DomainError("conflict","Stale or missing live question");
     tx.insert(interviewTurns).values({
       id:randomUUID(), sessionId:id, clientTurnId:input.clientTurnId, sequence,
-      question:getDemoQuestion(sequence-1, speech.interviewerLocale), answer:input.answer, answerSource:input.source,
-      originalStt:null, createdAt:now()
+      question:activeQuestion?.question??getDemoQuestion(sequence-1, speech.interviewerLocale), answer:input.answer, answerSource:input.source,
+      originalStt:input.originalStt??null, createdAt:now()
     }).run();
-    addEvent(tx,id,"answer.committed",{sequence,source:input.source});
+    addEvent(tx,id,"answer.committed",{sequence,source:input.source,clientProvidedSpeech:input.source!=="typed",questionId:activeQuestion?.id??null});
     return getSession(ownerId,id);
   });
 }
