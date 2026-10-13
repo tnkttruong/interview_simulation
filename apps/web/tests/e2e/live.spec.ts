@@ -23,5 +23,6 @@ test("offline workspace links to live interview",async({page})=>{
  await expect(page.getByRole("link",{name:/AI Interview/})).toBeVisible();
  await page.getByRole("link",{name:/AI Interview/}).click();
  await expect(page.getByRole("heading",{name:"Practice a real interview with AI"})).toBeVisible();
+ await page.getByRole("button",{name:"3. preflight"}).click();
  await expect(page.getByText(/Azure Speech unavailable\/not configured/)).toBeVisible();
 });
