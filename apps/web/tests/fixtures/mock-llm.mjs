@@ -22,4 +22,4 @@ const server=createServer(async(req,res)=>{
    rationale:"Grounded follow-up on role and historical examples"};
  res.end(JSON.stringify({model:"ci-mock-model",choices:[{message:{content:JSON.stringify(result)}}]}));
 });
-server.listen(8787,"127.0.0.1",()=>console.log("Mock LLM ready on 8787"));
+server.listen(8787,()=>console.log("Mock LLM ready on 8787"));
