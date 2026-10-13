@@ -17,7 +17,7 @@ Maintainer explicitly approved all six choices on 2026-10-13:
 
 Additional architecture choices unchanged: **pnpm workspace**, **React**, **Tailwind + shadcn/ui**, **Zod**, **Vitest + Playwright**, **Pino structured logs**, **Docker + Compose**. No mandatory Redis, message broker, Kubernetes, WebRTC or agent framework in v1.
 
-**Review sequencing:** The technical architecture and this P0 plan are reviewed **together in PR #1**. The review PR changes documentation and mockups only. Application code belongs in a separate implementation PR after approval.
+**Review sequencing:** Architecture, this plan, mockups and P0 foundation implementation are delivered together in PR #1. CI and acceptance tests gate merge.
 
 ## 2. What P0 does and does NOT do
 
@@ -25,7 +25,7 @@ Goal: a contributor can clone the repository, install once with pnpm, run a real
 
 P0 includes **project foundation**: package manager, app shell, core domain types, config, DB/auth, mock providers, basic test strategy, CI, Docker, OSS documentation, and a reusable screen design system. Later PRs implement AI scenario creation, Azure Speech, real interview engine, evaluation and audit export.
 
-**This combined PR (architecture + P0 plan/design review)** ships only documents and UI mockups; do not confuse reviewing it with implementing all P0 tasks. Implement scaffolding in a subsequent implementation PR after reviewing this plan and merging/landing required architecture decisions.
+**PR #1 includes architecture, UX design and P0 scaffold implementation.** Real AI generation, Azure Speech, scoring and ZIP export remain explicit follow-up phases P1–P4.
 
 ## 3. UX-first deliverables included in this PR
 
@@ -178,9 +178,9 @@ Each feature PR must update matching UI spec, contracts, migrations, logs and te
 | Security and sensitive evidence | Better Auth, per-user scopes, consent, log redaction, audio off by default |
 | Monorepo complexity | Only web app + small pure core package; no broker/worker/service split |
 
-### Definition of "plan approved"
+### Definition of "PR #1 ready to merge"
 
-Maintainer reviews this P0 plan, the SVG and HTML prototype, and confirms UI layout and language/voice UX. **Then** implementation can start in a new P0 code PR. Current PR contains no application runtime changes.
+Maintainer reviews this P0 plan, the SVG and HTML prototype, and confirms UI layout and language/voice UX. **The P0 code belongs in this same PR #1.** Reviewers should only merge when CI and applicable acceptance tests pass.
 
 ## 9. Review items
 
@@ -188,6 +188,17 @@ Maintainer reviews this P0 plan, the SVG and HTML prototype, and confirms UI lay
 - [ ] Preflight uses the three required independent selectors and preview/device checks.
 - [ ] P0 scope (project foundation + DEMO_MODE UI) approved.
 - [ ] Accepted that real Azure STT/TTS & dynamic Azure catalog ship in P2, not P0.
+- [ ] Confirm P0 code is committed on PR #1 and CI verifies local and Docker startup.
 - [ ] License Apache-2.0 and previously approved stack remain unchanged.
 
 References: [technical architecture](../TECHNICAL_ARCHITECTURE.md) | [UX screens](../ui/SCREEN_SPEC.md) | [SVG](../ui/mockups-overview.svg) | [HTML prototype](../ui/prototype.html).
+
+## 10. Clarified demo implementation invariants
+
+- P0 is a real executable app, not the static HTML; demo sessions, scenario revisions/approval, selected voice/languages, typed answers and workflow events persist in SQLite after refresh and restart.
+- P0 mock LLM responses are deterministic and clearly marked demo. No paid provider secrets needed to run local or CI.
+- Authentication and record ownership occur in route handlers/use cases; never trust user IDs or scenario approval from the browser.
+- Simulator Start Meeting requires the latest approved scenario revision and separate informed transcript consent. A request to revise clears previous eligibility.
+- All state changes enforce allowed transition map, expected revision and idempotency; recover pending question/TTS delivery status without generating duplicates.
+- Provide typed-answer fallback for STT unavailable; provenance of edits preserved on future real STT records.
+- Acceptance requires clean pnpm install with committed lockfile, auth, migrations, restart persistence, offline smoke tests and Docker cold start in CI. Unverified checklist rows must remain unchecked and disclosed.

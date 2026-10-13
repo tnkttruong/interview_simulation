@@ -58,7 +58,7 @@ Persistence: editable preflight selection → eligibility check → **immutable 
 - Voice is supported in selected locale & Azure Speech region; candidate STT locale is independently supported for STT.
 - Mic access allowed and SDK check is successful. Speaker/voice sample played where browser support allows.
 - No Azure Speech subscription key in browser; user-authorized server issues a short-lived token and refreshes it before expiry.
-- User consents to transcript retention and chooses hint/coaching mode; raw audio recording off by default.
+- User explicitly opts in to transcript retention (unchecked by default), chooses hint/coaching mode; raw audio recording off by default.
 - Config/quota/connection checks succeed, or the UI clearly enters **Demo Mode**, never passing a fake test as real.
 - Start button blocked with accessible, actionable errors until mandatory checks pass.
 
@@ -106,3 +106,10 @@ Paused/recovering session must show persisted state; repeated submissions/reconn
 - Legacy React speech sample (archived): https://github.com/Azure-Samples/AzureSpeechReactSample
 
 This specification is the UX contract for later code PRs. Any change affecting voice or locale behavior must update this document, tests and relevant architecture decisions.
+
+## 8. Text fallback, consent and mock-state safeguards
+
+- Transcript retention is a distinct **unchecked** checkbox at first entry; store immutable consent policy version/time on session creation. No prechecked consent or silent auto-opt-in.
+- When STT permission/network/recognition fails, offer a text-answer field in the same meeting screen. A user correction never overwrites the raw STT transcript; record recognized text, confirmed answer, timestamps and correction provenance.
+- In demo mode, microphone/speaker tests are **simulations**, not permission results. The demo start gate still requires the latest approved scenario revision, valid selected locale/voice and explicit consent. The real speech meeting adds actual device/catalog/quota checks in P2.
+- Sidebar may jump between design screens but cannot mutate server session state or bypass approval. Change of scenario revision invalidates start eligibility.

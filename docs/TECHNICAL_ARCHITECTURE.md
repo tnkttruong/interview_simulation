@@ -2,7 +2,7 @@
 
 **Status:** SIX TECH-STACK DECISIONS APPROVED / COMBINED ARCHITECTURE + P0 + UI REVIEW  
 **Date:** 2026-10-13  
-**Scope of this PR:** Combined architecture, P0 plan, 9-screen UI specification, SVG and standalone HTML prototype **only**. No application code, dependency installation, infrastructure provisioning, or secrets.
+**Scope of this PR:** Combined architecture, P0 implementation plan, UI specification and mockups; P0 scaffold/runtime is now included in the same PR. Real AI and Azure integrations remain P1–P4.
 
 ## 0. Goals and non-goals
 
@@ -266,7 +266,7 @@ CI gates: pnpm frozen install, lint, typecheck, unit/integration, build, E2E smo
 
 ## 11. OSS contributor experience
 
-After architecture approval, first implementation PR should deliver:
+For P0 in this PR, the implementation must deliver:
 - Apache-2.0 LICENSE (if approved), README with screenshots/diagram/architecture trade-offs, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, issue/PR templates and changelog policy.
 - .env.example with safe placeholder names and validated error messaging.
 - Local quickstart, text-only DEMO_MODE for contributors without Azure/LLM credentials, scripted fixtures, one-command Docker Compose.
@@ -274,9 +274,9 @@ After architecture approval, first implementation PR should deliver:
 - Conventional commits; semantic versioning once public releases begin; no "works on Vercel/serverless" promises with local SQLite.
 - Clear path for custom LLM provider and language/voice adapters, documented extension points rather than undocumented monkeypatching.
 
-## 12. Incremental delivery plan (separate PRs after approval)
+## 12. Delivery plan (P0 in PR #1; P1+ later)
 
-**P0 — OSS foundation:** pnpm workspace, Next app, core package, SQLite/Drizzle migrations, Better Auth, Docker/Compose, docs, mock providers, CI. Acceptance: fresh clone -> pnpm dev and docker compose -> healthy UI; no paid keys needed in DEMO_MODE.
+**P0 — OSS foundation (in PR #1):** pnpm workspace, Next app, core package, SQLite/Drizzle migrations, Better Auth, Docker/Compose, docs, mock providers, CI. Acceptance: fresh clone -> pnpm dev and docker compose -> healthy UI; no paid keys needed in DEMO_MODE.
 
 **P1 — Scenario planning:** JD/CV upload + parse, planner structured outputs, review chat and versioned approval. Acceptance: revisions immutable, only approved plan can start.
 
@@ -300,7 +300,7 @@ Decisions 1–6 were explicitly approved by the maintainer on 2026-10-13. Items 
 5. **[x] Better Auth local email/password** for multi-user self-host.
 6. **[x] Apache-2.0 license** (alternative MIT).
 7. **[ ] Transcript always saved with informed user consent; raw audio off by default.**
-8. **[ ] Confirm combined P0 implementation scope and 9-screen UX mockups before coding**, P0 application code in a separate PR.
+8. **[x] P0 implementation is part of PR #1**, while real paid speech, generation and evaluation remain P1–P4.
 
 ## 14. Reference docs (for future implementation validation)
 
@@ -313,4 +313,45 @@ Decisions 1–6 were explicitly approved by the maintainer on 2026-10-13. Items 
 - Azure React example (archived; use as reference only): https://github.com/Azure-Samples/AzureSpeechReactSample
 
 ---
-**Review gate:** Six stack choices are approved. The P0/UI blueprint is ready for review in this combined PR; application implementation still belongs in a **separate code PR**, never silently added here.
+**Review gate:** The six stack choices are approved. PR #1 combines this reviewed architecture, P0 code and UX prototype; require CI green and the P0 acceptance checklist before merge.
+
+## 15. Executable session-transition contract (P0/P2)
+
+State transitions are server-authoritative, owner-scoped, idempotent and version checked. A UI navigation event is *not* an interview-state transition.
+
+| Current state | Command | Next state | Preconditions / recovery |
+|---|---|---|---|
+| CREATED | enterPreflight | PREFLIGHT | Approved immutable scenario exists |
+| PREFLIGHT | passPreflight | READY | Consent and speech settings snapshot valid; real device/catalog/quota checks in P2 |
+| READY | start | IN_PROGRESS | Approved revision unchanged, expected version, idempotency key |
+| IN_PROGRESS | pause | PAUSED | Persist current finalized turns first; stop STT/TTS |
+| IN_PROGRESS | connectionLost | INTERRUPTED | Last durable turn ID retained |
+| PAUSED / INTERRUPTED | resume | IN_PROGRESS | Owner verified, same scenario/config, reconnect reconciliation; never regenerate a committed question |
+| IN_PROGRESS / PAUSED / INTERRUPTED | finish | COMPLETED | Explicitly freeze accepted transcript; incomplete answers marked incomplete |
+| COMPLETED | beginEvaluation | EVALUATING | Frozen evidence version exists |
+| EVALUATING | evaluationSucceeded | EVALUATED | Evidence references validate |
+| Nonterminal | cancel | CANCELED | Confirm user intent; terminal |
+| Nonterminal | unrecoverableError | FAILED | Sanitized error, terminal with export/debug path |
+
+Terminal states COMPLETED (for direct interview activity), EVALUATED, FAILED and CANCELED cannot return to active interview. COMPLETED alone may progress to EVALUATING. Reject invalid transitions and conflicts with 409; same idempotency key + payload returns prior result.
+
+**Crash/TTS recovery:** a question is persisted with stable server turn ID and state `QUEUED` before delivery. Client acknowledgments move it through `TTS_STARTED`, `TTS_COMPLETED` or `TTS_FAILED`. On reconnect, retrieve the pending durable question and delivery status; do not ask the LLM for another question until the pending one is resolved. Retrying an answer with the same clientTurnId must never fork the interview.
+
+**Consent:** unchecked by default. Snapshot consent policy version/time and selected input/output locales per session. Revocation stops collection; user-visible delete controls/retention operate on transcripts and uploaded CV; logs contain sanitized metadata only.
+
+**Fallback answer:** text submission may replace failed STT. Preserve original STT segment(s), candidate-confirmed correction and provenance in separate fields rather than overwriting the evidence. For scoring, expose the answer source (typed / recognized / corrected).
+
+## 16. P0 demo persistence matrix
+
+| Object | Durable in P0 | Notes |
+|---|---|---|
+| Users / Better Auth sessions | Yes | Persistent SQLite; server-side ownership |
+| Scenario revisions / approval | Yes | Explicit approval per revision; immutable snapshot |
+| Interview sessions / speech config | Yes | Locales/voice, policy and scenario revision snapshots |
+| Demo turns / typed answers | Yes | Demo-only provider, deterministic fixture questions |
+| Domain state transitions/events | Yes | Transactional append-on-write journal |
+| Actual CV binary / production JD extraction | No | P1 real upload/parse; demo previews are labeled |
+| Live STT/TTS, audio recording | No | P2 only, never claim in demo |
+| Real evaluation, audit ZIP | No | P4 only; show demonstrative UI labels |
+
+**Validation:** P0 E2E must cover unauthorized and cross-owner access, refresh/restart durability, scenario changes invalidating start approval, empty/unsupported voice, declined consent, repeated start/submit idempotency, and fallback typed answers. Distinguish mocked device tests from an actual mic grant.
