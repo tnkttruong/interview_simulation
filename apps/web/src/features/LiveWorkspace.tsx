@@ -22,6 +22,7 @@ async function api<T>(url:string,init?:RequestInit):Promise<T>{
 }
 export default function LiveWorkspace({email}:{email:string}){
  const [step,setStep]=useState<"prepare"|"review"|"preflight"|"meeting"|"results">("prepare");
+ const [hydrated,setHydrated]=useState(false);
  const [role,setRole]=useState("Senior Backend Engineer"),[jd,setJd]=useState("");
  const [focus,setFocus]=useState(""),[cvText,setCvText]=useState(""),[cvName,setCvName]=useState("pasted-cv.txt");
  const [scenario,setScenario]=useState<Scenario|null>(null),[plan,setPlan]=useState<Plan|null>(null);
@@ -38,6 +39,7 @@ export default function LiveWorkspace({email}:{email:string}){
  const visibleVoices=catalog?.enabled?catalog.voices[interviewerLocale]||[]:[...voiceByLocale[interviewerLocale]];
  const approved=!!scenario?.revisions.find(x=>x.revision===scenario.latestRevision)?.approvedAt;
  useEffect(()=>{
+  setHydrated(true);
   fetch("/api/live/speech/voices").then(x=>x.json()).then((d:Catalog)=>{
    if(d.voices)setCatalog(d);
   }).catch(()=>{});
@@ -213,7 +215,7 @@ export default function LiveWorkspace({email}:{email:string}){
    setMessage("Speech recognized on this device. Edit the text before confirming if needed.");
   });
  }
- return <div className="shell">
+ return <div className="shell" data-testid="live-workspace" data-hydrated={hydrated?"true":"false"}>
   <aside className="sidebar"><div className="brand">◉ <strong>Interview Simulation</strong></div>
    <div className="side-caption">AI LIVE · P1–P3</div>
    <nav aria-label="Interview steps">
