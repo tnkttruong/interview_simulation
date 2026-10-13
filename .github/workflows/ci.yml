@@ -48,7 +48,7 @@ jobs:
         run: pnpm check
       - name: Browser smoke tests
         run: |
-          pnpm exec playwright install --with-deps chromium
+          pnpm --filter @interview/web exec playwright install --with-deps chromium
           pnpm test:e2e
       - name: Build single-service Docker image
         run: docker build -t interview-simulation:p0 .
