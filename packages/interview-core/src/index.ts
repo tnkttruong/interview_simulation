@@ -32,7 +32,7 @@ export type SessionState = typeof sessionStates[number];
 
 const transitionRules: Partial<Record<SessionState, Record<string, SessionState>>> = {
   CREATED: { enterPreflight: "PREFLIGHT", cancel: "CANCELED" },
-  PREFLIGHT: { passPreflight: "READY", cancel: "CANCELED" },
+  PREFLIGHT: { passPreflight: "READY", skipDemoPreflight: "READY", cancel: "CANCELED" },
   READY: { start: "IN_PROGRESS", cancel: "CANCELED" },
   IN_PROGRESS: { pause: "PAUSED", connectionLost: "INTERRUPTED", finish: "COMPLETED", cancel: "CANCELED" },
   PAUSED: { resume: "IN_PROGRESS", finish: "COMPLETED", cancel: "CANCELED" },
@@ -52,6 +52,18 @@ export const demoQuestions = [
   "What trade-offs would you consider when scaling the database?",
   "What would you improve if you had another month on your last project?"
 ] as const;
-export function getDemoQuestion(index: number): string {
-  return demoQuestions[index % demoQuestions.length]!;
+export const maxDemoTurns = 15;
+
+const demoQuestionsVi = [
+  "Bạn có thể giới thiệu bản thân và mô tả một dự án liên quan không?",
+  "Hãy kể về một sự cố khó trong môi trường production và cách bạn điều tra.",
+  "Bạn sẽ thiết kế một dịch vụ đáng tin cậy cho vị trí này như thế nào?",
+  "Bạn sẽ cân nhắc những đánh đổi nào khi mở rộng cơ sở dữ liệu?",
+  "Nếu có thêm một tháng cho dự án gần đây nhất, bạn sẽ cải thiện điều gì?"
+] as const;
+
+/** P0 uses deterministic localized text fixtures, not live AI or speech. */
+export function getDemoQuestion(index: number, locale: typeof supportedLocales[number] = "en-US"): string {
+  const catalog: readonly string[] = locale === "vi-VN" ? demoQuestionsVi : demoQuestions;
+  return catalog[index % catalog.length]!;
 }
