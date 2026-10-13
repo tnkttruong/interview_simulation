@@ -97,6 +97,7 @@ export function changeScenario(ownerId: UserId, id: string, payload: unknown) {
     if (!scenario) throw new Error("Scenario not found");
     if (scenario.latestRevision !== input.expectedRevision) throw new Error("Scenario revision conflict");
     if (input.action === "revise") {
+      if (scenario.latestRevision >= MAX_SCENARIO_REVISIONS) throw new Error("Scenario revision limit reached");
       const revision = scenario.latestRevision + 1;
       tx.insert(scenarioRevisions).values({ scenarioId:id, revision, notes:input.notes, approvedAt:null }).run();
       tx.update(scenarios).set({ latestRevision: revision }).where(eq(scenarios.id,id)).run();
