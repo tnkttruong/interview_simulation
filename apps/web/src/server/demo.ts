@@ -203,6 +203,8 @@ export function changeSession(ownerId:UserId,id:string,payload:unknown) {
       .where(and(eq(interviewSessions.id,id),eq(interviewSessions.ownerId,ownerId))).get();
     if (!row) throw new Error("Session not found");
     if (row.version !== input.expectedVersion) throw new Error("Session version conflict");
+    if (row.version >= MAX_SESSION_STATE_CHANGES && input.action !== "finish" && input.action !== "cancel")
+      throw new Error("Session transition limit reached");
     const state = transition(row.state as SessionState,input.action);
     tx.update(interviewSessions).set({state,version:row.version+1}).where(eq(interviewSessions.id,id)).run();
     addEvent(tx,id,"interview."+input.action,{from:row.state,to:state});
