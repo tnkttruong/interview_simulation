@@ -30,11 +30,18 @@ jobs:
             pdfWorker: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js',
             azure: 'https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.52.0/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle-min.js'
           };
+          const sha256 = {
+            pdf: 'W1eZ5vjGgGYyB6xbQu4U7tKkBvp69I9QwVTwwLFWaUY=',
+            pdfWorker: '/qvfMJdw7SS7oxpUZ4Ns3Iz2OccFryfVK1hbBBu4Uns=',
+            azure: 'PkbvyIZFDxlA/U2lyvNaNiqEYplTVuMbI8PGrFi6Ou4='
+          };
           for(const [name,url] of Object.entries(sources)){
             const response=await fetch(url,{signal:AbortSignal.timeout(30000)});
             if(!response.ok)throw Error(name+' HTTP '+response.status);
             const bytes=Buffer.from(await response.arrayBuffer());
-            console.log('INTEGRITY',name,bytes.byteLength,'sha256-'+createHash('sha256').update(bytes).digest('base64'));
+            const actual=createHash('sha256').update(bytes).digest('base64');
+            if(actual!==sha256[name])throw Error(name+' SRI digest differs from pinned, reviewed SDK');
+            console.log('PINNED-SDK-VERIFIED',name,bytes.byteLength);
           }
           NODE
       - name: Configure offline demo
