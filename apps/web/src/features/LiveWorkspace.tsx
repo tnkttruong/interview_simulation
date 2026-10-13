@@ -39,10 +39,9 @@ export default function LiveWorkspace({email}:{email:string}){
  const visibleVoices=catalog?.enabled?catalog.voices[interviewerLocale]||[]:[...voiceByLocale[interviewerLocale]];
  const approved=!!scenario?.revisions.find(x=>x.revision===scenario.latestRevision)?.approvedAt;
  useEffect(()=>{
-  setHydrated(true);
   fetch("/api/me/ai-settings",{cache:"no-store"}).then(x=>x.json()).then((d:{settings?:{interviewerLocale:Locale;candidateSttLocale:Locale;voiceId:string}})=>{
    if(d.settings){setInterviewerLocale(d.settings.interviewerLocale);setCandidateLocale(d.settings.candidateSttLocale);setVoice(d.settings.voiceId);}
-  }).catch(()=>{});
+  }).catch(()=>{}).finally(()=>setHydrated(true));
   fetch("/api/live/speech/voices").then(x=>x.json()).then((d:Catalog)=>{
    if(d.voices)setCatalog(d);
   }).catch(()=>{});
