@@ -1,6 +1,6 @@
 # UI / UX Screen Specification — Interview Simulation
 
-**Status:** UX blueprint for P0 (reviewable, not an implemented application)  
+**Status:** UX blueprint and working offline P0 demo; live AI/speech remain future work  
 **Approved architecture:** pnpm, Next.js full-stack, SQLite/Drizzle, Azure Speech, pluggable LLM; see [technical architecture](../TECHNICAL_ARCHITECTURE.md) in this same PR.  
 **Artifacts:** [Nine-screen storyboard](./mockups-overview.svg) | [Interactive static prototype](./prototype.html) (open in browser locally)
 
@@ -26,7 +26,7 @@ Interface display language is **separate** from both the interviewer's spoken la
 | S08 | Results | Evidence-linked score/rubric, hints disclosure, improvement plan | Mock report | P4 |
 | S09 | History/audit | Sessions, Q/A replay, workflow event status, export evidence ZIP | Mock records | P4 |
 
-**P0 is not full feature implementation**: UI prototype is strictly static/demo-only; AI, uploads, Azure Speech, transcript storage, scoring and ZIP export are delivered later.
+**P0 is not full feature implementation**: The separate HTML prototype is static. The executable P0 app persists typed transcripts and scenario/session state in SQLite. Real AI, uploads, Azure Speech, scoring and ZIP export remain later phases.
 
 ## 3. Preflight specification — REQUIRED
 
@@ -109,7 +109,7 @@ This specification is the UX contract for later code PRs. Any change affecting v
 
 ## 8. Text fallback, consent and mock-state safeguards
 
-- Transcript retention is a distinct **unchecked** checkbox at first entry; store immutable consent policy version/time on session creation. No prechecked consent or silent auto-opt-in.
+- Transcript retention is a distinct **unchecked** checkbox at first entry; P0 stores the consent boolean in the immutable session speech-config snapshot. Consent policy version/time are still planned for later phases. No prechecked consent or silent auto-opt-in.
 - When STT permission/network/recognition fails, offer a text-answer field in the same meeting screen. A user correction never overwrites the raw STT transcript; record recognized text, confirmed answer, timestamps and correction provenance.
 - In demo mode, microphone/speaker tests are **simulations**, not permission results. The demo start gate still requires the latest approved scenario revision, valid selected locale/voice and explicit consent. The real speech meeting adds actual device/catalog/quota checks in P2.
 - Sidebar may jump between design screens but cannot mutate server session state or bypass approval. Change of scenario revision invalidates start eligibility.
