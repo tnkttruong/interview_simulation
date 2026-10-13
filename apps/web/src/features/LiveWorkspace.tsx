@@ -40,6 +40,9 @@ export default function LiveWorkspace({email}:{email:string}){
  const approved=!!scenario?.revisions.find(x=>x.revision===scenario.latestRevision)?.approvedAt;
  useEffect(()=>{
   setHydrated(true);
+  fetch("/api/me/ai-settings",{cache:"no-store"}).then(x=>x.json()).then((d:{settings?:{interviewerLocale:Locale;candidateSttLocale:Locale;voiceId:string}})=>{
+   if(d.settings){setInterviewerLocale(d.settings.interviewerLocale);setCandidateLocale(d.settings.candidateSttLocale);setVoice(d.settings.voiceId);}
+  }).catch(()=>{});
   fetch("/api/live/speech/voices").then(x=>x.json()).then((d:Catalog)=>{
    if(d.voices)setCatalog(d);
   }).catch(()=>{});
@@ -221,6 +224,7 @@ export default function LiveWorkspace({email}:{email:string}){
    <nav aria-label="Interview steps">
     {(["prepare","review","preflight","meeting","results"] as const).map((x,i)=>
      <button key={x} className={step===x?"active":""} onClick={()=>setStep(x)}>{i+1}. {x}</button>)}
+    <Link href="/settings" style={{color:"white",padding:14}}>⚙ AI Settings</Link>
     <Link href="/" style={{color:"white",padding:14}}>← Offline P0 demo</Link>
    </nav><div className="sidebar-bottom">AI responses require your own model key. Azure speech requires your own Azure resource.</div>
   </aside><div className="main-area">
