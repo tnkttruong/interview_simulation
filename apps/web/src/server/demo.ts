@@ -4,7 +4,7 @@ import { and, count, desc, eq, gte } from "drizzle-orm";
 import { z } from "zod";
 import { DomainError, getDemoQuestion, maxDemoTurns, transition, validateSpeechConfig, type SessionState } from "@interview/core";
 import { db } from "./db/client";
-import { interviewSessions, interviewTurns, liveQuestions, scenarioRevisions, scenarios, workflowEvents } from "./db/schema";
+import { interviewSessions, interviewTurns, liveQuestions, scenarioPlans, scenarioRevisions, scenarios, workflowEvents } from "./db/schema";
 
 const now = () => Date.now();
 const scenarioInput = z.object({
@@ -70,7 +70,8 @@ export function listScenarios(ownerId: UserId, limit: number, offset: number) {
     .orderBy(desc(scenarios.createdAt), desc(scenarios.id)).limit(limit).offset(offset).all();
   return { items, total, nextOffset: offset + items.length < total ? offset + items.length : null };
 }
-export function createScenario(ownerId: UserId, payload: unknown) {
+type PlanAttachment={cvText:string;cvFilename:string;planJson:string;modelId:string};
+export function createScenario(ownerId: UserId, payload: unknown, planned?:PlanAttachment) {
   const input = scenarioInput.parse(payload);
   return db.transaction((tx) => {
     const total = tx.select({ value: count() }).from(scenarios).where(eq(scenarios.ownerId, ownerId)).get()!.value;
@@ -80,6 +81,7 @@ export function createScenario(ownerId: UserId, payload: unknown) {
     const scenario = { id: randomUUID(), ownerId, ...input, latestRevision: 1, createdAt: now() };
     tx.insert(scenarios).values(scenario).run();
     tx.insert(scenarioRevisions).values({ scenarioId: scenario.id, revision: 1, notes: "Initial demo scenario", approvedAt: null }).run();
+    if(planned)tx.insert(scenarioPlans).values({scenarioId:scenario.id,revision:1,...planned,createdAt:now()}).run();
     return scenario;
   });
 }
@@ -89,7 +91,7 @@ export function getScenario(ownerId: UserId, id: string) {
     .where(eq(scenarioRevisions.scenarioId, id)).orderBy(desc(scenarioRevisions.revision)).all();
   return { ...scenario, revisions };
 }
-export function changeScenario(ownerId: UserId, id: string, payload: unknown) {
+export function changeScenario(ownerId: UserId, id: string, payload: unknown, planned?:PlanAttachment) {
   const input = z.discriminatedUnion("action", [
     z.object({ action: z.literal("approve"), expectedRevision: z.number().int().positive() }),
     z.object({ action: z.literal("revise"), expectedRevision: z.number().int().positive(), notes: z.string().trim().min(1).max(1000) })
@@ -103,6 +105,7 @@ export function changeScenario(ownerId: UserId, id: string, payload: unknown) {
       const revision = scenario.latestRevision + 1;
       tx.insert(scenarioRevisions).values({ scenarioId:id, revision, notes:input.notes, approvedAt:null }).run();
       tx.update(scenarios).set({ latestRevision: revision }).where(eq(scenarios.id,id)).run();
+      if(planned)tx.insert(scenarioPlans).values({scenarioId:id,revision,...planned,createdAt:now()}).run();
     } else {
       const current = tx.select().from(scenarioRevisions).where(and(eq(scenarioRevisions.scenarioId,id), eq(scenarioRevisions.revision,scenario.latestRevision))).get();
       if (!current?.approvedAt) tx.update(scenarioRevisions).set({ approvedAt:now() })

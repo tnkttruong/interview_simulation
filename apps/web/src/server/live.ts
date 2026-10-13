@@ -35,9 +35,9 @@ export async function createLiveScenario(ownerId:string,payload:unknown){
   gte(scenarios.createdAt,Date.now()-3600000))).get()!.n;
  if(total>=100||recent>=12)throw new DomainError("limit","Scenario creation quota reached");
  const generated=await planScenario(input.role,input.jobDescription,input.cvText,input.focus);
- const scenario=createScenario(ownerId,{role:input.role,jobDescription:input.jobDescription,focus:input.focus});
- db.insert(scenarioPlans).values({scenarioId:scenario.id,revision:1,cvText:input.cvText,
-   cvFilename:input.cvFilename,planJson:JSON.stringify(generated.output),modelId:generated.modelId,createdAt:Date.now()}).run();
+ const scenario=createScenario(ownerId,{role:input.role,jobDescription:input.jobDescription,focus:input.focus},{
+   cvText:input.cvText,cvFilename:input.cvFilename,planJson:JSON.stringify(generated.output),modelId:generated.modelId
+ });
  return getScenario(ownerId,scenario.id);
 }
 export async function reviseLiveScenario(ownerId:string,id:string,payload:unknown){
@@ -48,9 +48,9 @@ export async function reviseLiveScenario(ownerId:string,id:string,payload:unknow
  const previous=planFor(id,scenario.latestRevision);
  const generated=await revisePlan(previous.plan,input.feedback,scenario.jobDescription,previous.row.cvText);
  // CAS is rechecked by changeScenario after the slow LLM call.
- const updated=changeScenario(ownerId,id,{action:"revise",notes:input.feedback,expectedRevision:input.expectedRevision});
- db.insert(scenarioPlans).values({scenarioId:id,revision:updated.latestRevision,cvText:previous.row.cvText,
-  cvFilename:previous.row.cvFilename,planJson:JSON.stringify(generated.output),modelId:generated.modelId,createdAt:Date.now()}).run();
+ changeScenario(ownerId,id,{action:"revise",notes:input.feedback,expectedRevision:input.expectedRevision},{
+   cvText:previous.row.cvText,cvFilename:previous.row.cvFilename,planJson:JSON.stringify(generated.output),modelId:generated.modelId
+ });
  return getScenario(ownerId,id);
 }
 export function currentPlan(ownerId:string,id:string){
