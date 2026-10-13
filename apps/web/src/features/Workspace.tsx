@@ -25,6 +25,7 @@ async function api<T>(url:string,options?:RequestInit):Promise<T>{
 const toDate=(ts:number)=>new Date(ts).toLocaleString();
 export default function Workspace({userEmail}:{userEmail:string}) {
   const [screen,setScreen]=useState<Screen>("dashboard");
+  const [hydrated,setHydrated]=useState(false);
   const [scenarios,setScenarios]=useState<Scenario[]>([]);
   const [sessions,setSessions]=useState<Session[]>([]);
   const [scenario,setScenario]=useState<Scenario|null>(null);
@@ -50,7 +51,7 @@ export default function Workspace({userEmail}:{userEmail:string}) {
     const [a,b]=await Promise.all([api<Scenario[]>("/api/demo/scenarios"),api<Session[]>("/api/demo/sessions")]);
     setScenarios(a);setSessions(b);
   },[]);
-  useEffect(()=>{refresh().catch(e=>setError(String(e)));},[refresh]);
+  useEffect(()=>{setHydrated(true);refresh().catch(e=>setError(String(e)));},[refresh]);
   async function run(task:()=>Promise<void>){
     if(busy)return;
     setBusy(true);setError("");
@@ -135,7 +136,7 @@ export default function Workspace({userEmail}:{userEmail:string}) {
   }
   const approved=!!scenario?.revisions.find(r=>r.revision===scenario.latestRevision)?.approvedAt;
   const active=screen==="meeting"&&session?.state==="IN_PROGRESS";
-  return <div className="shell">
+  return <div className="shell" data-testid="workspace-shell" data-hydrated={hydrated?"true":"false"}>
     <aside className="sidebar">
       <div className="brand">◉ <strong>Interview<br/>Simulation</strong></div>
       <div className="side-caption">OPEN-SOURCE · P0 DEMO</div>

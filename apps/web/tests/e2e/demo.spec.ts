@@ -9,8 +9,10 @@ test("requires latest scenario approval and explicit transcript consent", async 
   await page.getByLabel("Password").fill("correct-horse-battery-staple!");
   await page.getByRole("button",{name:"Create account"}).click();
   await expect(page.getByRole("heading",{name:"Your interview workspace"})).toBeVisible();
+  await expect(page.getByTestId("workspace-shell")).toHaveAttribute("data-hydrated","true");
 
-  await page.getByRole("button",{name:/New interview/}).first().click();
+  await page.getByRole("button",{name:"New interview",exact:true}).click();
+  await expect(page.getByRole("heading",{name:"Describe the job"})).toBeVisible();
   await page.getByRole("button",{name:/Create demo scenario/}).click();
   await expect(page.getByRole("heading",{name:"Review & approve"})).toBeVisible();
 

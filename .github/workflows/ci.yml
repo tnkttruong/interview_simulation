@@ -50,6 +50,13 @@ jobs:
         run: |
           pnpm --filter @interview/web exec playwright install --with-deps chromium
           pnpm test:e2e
+      - name: Upload Playwright failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failure
+          path: apps/web/test-results
+          if-no-files-found: ignore
       - name: Build single-service Docker image
         run: docker build -t interview-simulation:p0 .
       - name: Verify Docker cold-start and health
