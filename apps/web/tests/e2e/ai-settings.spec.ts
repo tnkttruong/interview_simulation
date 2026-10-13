@@ -11,6 +11,7 @@ test("account saves and reloads AI provider/model/language preferences",async({p
  await page.getByLabel("Email").fill("settings-"+Date.now()+"@example.test");
  await page.getByLabel("Password").fill("correct-horse-battery-staple!");
  await page.getByRole("button",{name:"Create account"}).click();
+ await expect(page.getByRole("link",{name:/AI Interview/})).toBeVisible();
  await page.goto("/settings");
  await expect(page.getByRole("heading",{name:"AI settings"})).toBeVisible();
  await page.getByLabel("AI provider").selectOption("api_key");
