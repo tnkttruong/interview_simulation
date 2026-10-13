@@ -11,3 +11,5 @@ Run `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build` and `pnpm test:e2e`
 P0 state and mock questions live in `packages/interview-core`; REST routes only validate session/authorization and call use cases in `apps/web/src/server/demo.ts`. UI controls in `apps/web/src/features/Workspace.tsx` must not mutate trusted state directly. Every new write requires an owner check, state/version policy, and idempotency when retriable.
 
 Migrations live under `apps/web/scripts/migrations`; never silently auto-sync schemas in production. Add an explicit next-version SQL file for changes.
+
+P0 now defines provider contracts (no implementations) at `packages/interview-core/src/ports.ts`. Answer submission requires `expectedTurnSequence` to reject stale-tab assignments while preserving idempotent retries.

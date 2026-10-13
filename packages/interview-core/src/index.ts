@@ -1,4 +1,5 @@
 import { z } from "zod";
+export * from "./ports";
 
 export const supportedLocales = ["en-US", "en-GB", "vi-VN"] as const;
 export const voiceByLocale = {

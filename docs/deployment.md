@@ -14,3 +14,7 @@
 Image startup runs the explicit versioned SQL migrations before starting the web server. Back up database with SQLite's online backup operation (or `VACUUM INTO` using a separately validated destination), including any uploaded files when P1 exists. Do not merely copy an actively-written SQLite db file without the WAL.
 
 Do a restore drill into a separate volume; never migrate an only copy. Do not commit volume files, secrets or candidate transcripts. P0 does not include a web UI for deletion or scheduled retention; operators are responsible for lifecycle and policy.
+
+## P0 rate limits and observability
+
+Better Auth enables sign-in/sign-up throttling. Database transactions cap creation to 12 scenarios per hour (100 total), 30 sessions per hour (300 total) per account. Total caps remain until the operator adds retention/deletion support. List endpoints use `limit=1..50` and `offset=0..10000` and respond with `{items,total,nextOffset}`; scenario summaries omit JD. Demo API responses include `x-request-id` and sanitized Pino request logs (fixed operation, duration, status). Request bodies, transcripts, credentials and full URLs are not logged by this wrapper. Host publicly only behind a trusted TLS reverse proxy with independent ingress limits.
