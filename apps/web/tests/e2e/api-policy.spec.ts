@@ -60,7 +60,7 @@ test("requires approval, marks demo preflight accurately, and protects cross-use
   expect(eventTypes).toContain("preflight.demo_skipped");
   expect(eventTypes).not.toContain("preflight.passed");
 
-  const otherContext = await browser.newContext();
+  const otherContext = await browser.newContext({ baseURL: "http://localhost:3000" });
   try {
     const otherPage = await otherContext.newPage();
     await register(otherPage);
