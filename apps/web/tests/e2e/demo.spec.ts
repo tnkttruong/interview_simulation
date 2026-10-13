@@ -59,6 +59,7 @@ test("a new meeting requires fresh consent and old session evidence does not lea
   await page.getByRole("button",{name:"Review transcript & workflow events"}).click();
   await expect(page.getByText(/answer.committed/)).toBeVisible();
   await page.getByRole("button",{name:"Scenario review"}).first().click();
+  await page.getByRole("button",{name:"Browse scenarios"}).click();
   await page.getByRole("button",{name:/Senior Backend Engineer · v1/}).click();
   await page.getByRole("button",{name:"Continue to preflight"}).click();
   const consent=page.getByRole("checkbox",{name:/explicitly consent/});
