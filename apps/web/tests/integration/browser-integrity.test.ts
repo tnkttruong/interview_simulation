@@ -5,7 +5,7 @@ import {verifyPdfWorkerBytes} from "../../src/features/pdf-client";
 
 describe("version-pinned browser asset integrity",()=>{
  it("rejects an altered PDF worker payload before constructing an executable blob URL",async()=>{
-  const corrupted=new TextEncoder().encode("console.log('unexpected');").buffer;
+  const corrupted=new TextEncoder().encode("console.log('unexpected');").buffer as ArrayBuffer;
   await expect(verifyPdfWorkerBytes(corrupted)).rejects.toThrow("PDF worker integrity check failed");
  });
  it("uses SRI for the external Azure and PDF scripts",()=>{
