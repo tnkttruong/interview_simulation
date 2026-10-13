@@ -119,3 +119,13 @@ export const liveHints = sqliteTable("live_hints",{
   modelId:text("model_id").notNull(),
   createdAt:integer("created_at").notNull()
 },t=>[uniqueIndex("live_hint_seq").on(t.sessionId,t.sequence)]);
+
+export const aiSettings=sqliteTable("ai_settings",{
+  ownerId:text("owner_id").primaryKey().references(()=>user.id,{onDelete:"cascade"}),
+  provider:text("provider").notNull(),
+  model:text("model").notNull(),
+  interviewerLocale:text("interviewer_locale").notNull(),
+  candidateSttLocale:text("candidate_stt_locale").notNull(),
+  voiceId:text("voice_id").notNull(),
+  updatedAt:integer("updated_at").notNull()
+});

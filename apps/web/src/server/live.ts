@@ -6,7 +6,8 @@ import { DomainError, maxDemoTurns, validateSpeechConfig } from "@interview/core
 import { db } from "./db/client";
 import { interviewSessions,interviewTurns,liveHints,liveQuestions,scenarioPlans,scenarios,workflowEvents } from "./db/schema";
 import { changeScenario,createScenario,createSession,getScenario,getSession } from "./demo";
-import {hintSchema,liveConfigured,nextInterviewQuestion,planScenario,planSchema,proposeHint,promptVersion,revisePlan} from "./ai";
+import {hintSchema,nextInterviewQuestion,planScenario,planSchema,proposeHint,promptVersion,revisePlan} from "./ai";
+import {assertReady} from "./ai-settings";
 
 const created=z.object({role:z.string().trim().min(3).max(180),jobDescription:z.string().trim().min(10).max(20000),
   focus:z.string().trim().max(1500).default(""),cvText:z.string().trim().min(15).max(30000),
@@ -34,7 +35,7 @@ export async function createLiveScenario(ownerId:string,payload:unknown){
  const recent=db.select({n:count()}).from(scenarios).where(and(eq(scenarios.ownerId,ownerId),
   gte(scenarios.createdAt,Date.now()-3600000))).get()!.n;
  if(total>=100||recent>=12)throw new DomainError("limit","Scenario creation quota reached");
- const generated=await planScenario(input.role,input.jobDescription,input.cvText,input.focus);
+ const generated=await planScenario(ownerId,input.role,input.jobDescription,input.cvText,input.focus);
  const scenario=createScenario(ownerId,{role:input.role,jobDescription:input.jobDescription,focus:input.focus},{
    cvText:input.cvText,cvFilename:input.cvFilename,planJson:JSON.stringify(generated.output),modelId:generated.modelId
  });
@@ -46,7 +47,7 @@ export async function reviseLiveScenario(ownerId:string,id:string,payload:unknow
  if(scenario.latestRevision!==input.expectedRevision)throw new DomainError("conflict","Scenario revision conflict");
  if(scenario.latestRevision>=20)throw new DomainError("limit","Scenario revision limit reached");
  const previous=planFor(id,scenario.latestRevision);
- const generated=await revisePlan(previous.plan,input.feedback,scenario.jobDescription,previous.row.cvText);
+ const generated=await revisePlan(ownerId,previous.plan,input.feedback,scenario.jobDescription,previous.row.cvText);
  // CAS is rechecked by changeScenario after the slow LLM call.
  changeScenario(ownerId,id,{action:"revise",notes:input.feedback,expectedRevision:input.expectedRevision},{
    cvText:previous.row.cvText,cvFilename:previous.row.cvFilename,planJson:JSON.stringify(generated.output),modelId:generated.modelId
@@ -59,7 +60,7 @@ export function currentPlan(ownerId:string,id:string){
  return {scenario,plan:planned.plan,modelId:planned.row.modelId,cvFilename:planned.row.cvFilename};
 }
 export function startLive(ownerId:string,input:unknown) {
- if(!liveConfigured())throw new DomainError("invalid","Live AI provider not configured");
+ assertReady(ownerId);
  const data=z.object({scenarioId:z.string().uuid(),revision:z.number().int().positive(),
   requestKey:z.string().uuid(),speech:z.unknown()}).parse(input);
  // Keep legacy start, approval, snapshot, ownership and idempotency invariants.
@@ -77,7 +78,7 @@ export async function prepareLiveQuestion(ownerId:string,id:string){
  if(existing)return getSession(ownerId,id);
  const {plan}=planFor(session.scenarioId,session.scenarioRevision);
  const speech=validateSpeechConfig(JSON.parse(session.speechConfig));
- const generated=await nextInterviewQuestion(plan,snapshot.turns,speech.interviewerLocale);
+ const generated=await nextInterviewQuestion(ownerId,plan,snapshot.turns,speech.interviewerLocale);
  db.transaction(tx=>{
   const row=tx.select().from(interviewSessions).where(eq(interviewSessions.id,id)).get();
   const last=tx.select({sequence:interviewTurns.sequence}).from(interviewTurns)
@@ -103,7 +104,7 @@ export async function exposeHint(ownerId:string,id:string){
  const existing=db.select().from(liveHints).where(and(eq(liveHints.sessionId,id),eq(liveHints.sequence,sequence))).get();
  if(existing)return {hint:existing.hint,modelId:existing.modelId,sequence};
  const {plan}=planFor(session.scenarioId,session.scenarioRevision);
- const generated=await proposeHint(plan,question.question,snapshot.turns);
+ const generated=await proposeHint(ownerId,plan,question.question,snapshot.turns);
  db.transaction(tx=>{
   const row=tx.select().from(interviewSessions).where(eq(interviewSessions.id,id)).get();
   const last=tx.select({sequence:interviewTurns.sequence}).from(interviewTurns)
