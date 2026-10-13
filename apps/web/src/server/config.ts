@@ -1,5 +1,9 @@
 import "server-only";
 import { resolve } from "node:path";
+import { loadEnvConfig } from "@next/env";
+const projectRoot = process.env.APP_ROOT_DIR ?? resolve(process.cwd(), "../..");
+// Server modules can be imported by a separate Next build worker; load root env here as well.
+loadEnvConfig(projectRoot);
 export function getConfig() {
   const demoMode = process.env.DEMO_MODE !== "false";
   const secret = process.env.BETTER_AUTH_SECRET;
@@ -11,6 +15,6 @@ export function getConfig() {
     demoMode,
     secret,
     appURL: process.env.APP_URL ?? "http://localhost:3000",
-    databaseFile: resolve(process.env.APP_ROOT_DIR ?? resolve(process.cwd(), "../.."), process.env.DATABASE_URL ?? "data/interview.db")
+    databaseFile: resolve(projectRoot, process.env.DATABASE_URL ?? "data/interview.db")
   };
 }
