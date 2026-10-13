@@ -1,0 +1,30 @@
+import {expect,test} from "@playwright/test";
+test("AI settings routes require login",async({request,page})=>{
+ expect((await request.get("/api/me/ai-settings")).status()).toBe(401);
+ expect((await request.put("/api/me/ai-settings",{data:{}})).status()).toBe(401);
+ await page.goto("/settings");await expect(page).toHaveURL(/\/signin/);
+});
+test("account saves and reloads AI provider/model/language preferences",async({page})=>{
+ await page.goto("/signin");
+ await page.getByRole("button",{name:/New here/}).click();
+ await page.getByLabel("Name").fill("Settings User");
+ await page.getByLabel("Email").fill("settings-"+Date.now()+"@example.test");
+ await page.getByLabel("Password").fill("correct-horse-battery-staple!");
+ await page.getByRole("button",{name:"Create account"}).click();
+ await page.goto("/settings");
+ await expect(page.getByRole("heading",{name:"AI settings"})).toBeVisible();
+ await page.getByLabel("AI provider").selectOption("api_key");
+ await page.getByLabel("AI model").fill("ci-mock-model");
+ await page.getByLabel("Default interviewer language").selectOption("vi-VN");
+ await page.getByLabel("Default candidate speech language").selectOption("en-GB");
+ await page.getByRole("button",{name:"Save AI settings"}).click();
+ await expect(page.getByText("Defaults saved for your account.")).toBeVisible();
+ await page.reload();
+ await expect(page.getByLabel("AI model")).toHaveValue("ci-mock-model");
+ await expect(page.getByLabel("Default interviewer language")).toHaveValue("vi-VN");
+ await page.goto("/live");
+ await expect(page.getByTestId("live-workspace")).toHaveAttribute("data-hydrated","true");
+ await page.getByRole("button",{name:"3. preflight"}).click();
+ await expect(page.getByLabel("AI interviewer language")).toHaveValue("vi-VN");
+ await expect(page.getByLabel("Your spoken input language")).toHaveValue("en-GB");
+});
