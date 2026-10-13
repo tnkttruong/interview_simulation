@@ -1,8 +1,8 @@
 # Technical Architecture Proposal — Interview Simulation
 
-**Status:** PROPOSED / AWAITING MAINTAINER APPROVAL  
+**Status:** SIX TECH-STACK DECISIONS APPROVED / COMBINED ARCHITECTURE + P0 + UI REVIEW  
 **Date:** 2026-10-13  
-**Scope of this PR:** Architecture and implementation plan **only**. No application code, dependency installation, infrastructure provisioning, or secrets.
+**Scope of this PR:** Combined architecture, P0 plan, 9-screen UI specification, SVG and standalone HTML prototype **only**. No application code, dependency installation, infrastructure provisioning, or secrets.
 
 ## 0. Goals and non-goals
 
@@ -89,7 +89,9 @@ Keep the workspace intentionally small; avoid a package for every class.
     └── packages/
         └── interview-core/             # pure TS/Zod domain types/state machine
 
-Only create other packages or apps after a concrete reuse need; do not add Turborepo/Nx initially. The domain package cannot import Next.js, a DB driver, or an AI provider. Application routes are thin adapters to server use cases; no business policy in React components.
+Only create other packages or apps after a concrete reuse need; do not add Turborepo/Nx initially.
+
+**Approved UI contract:** [Nine-screen specification](./ui/SCREEN_SPEC.md) covers the pre-meeting requirement to independently select interviewer spoken language, a compatible Azure TTS voice, and candidate microphone STT input language; see [storyboard](./ui/mockups-overview.svg) and [interactive prototype](./ui/prototype.html). The domain package cannot import Next.js, a DB driver, or an AI provider. Application routes are thin adapters to server use cases; no business policy in React components.
 
 ## 3. Local quickstart and deploy contract (target, after code lands)
 
@@ -286,19 +288,19 @@ After architecture approval, first implementation PR should deliver:
 
 **P5 — Hardening:** security/privacy review, failure simulation, backup/restore, contribution cleanup, public release.
 
-Each PR includes tests + migration/docs updates when applicable. No huge single PR. Stop after this architecture proposal and wait for approval before P0.
+Each PR includes tests + migration/docs updates when applicable. No huge single PR. Review the [combined P0 plan](./plans/P0_FOUNDATION_IMPLEMENTATION_PLAN.md) and UI mockups first; implement the P0 foundation in a separate code PR.
 
-## 13. Open decisions requiring maintainer confirmation
+## 13. Architecture decisions and remaining review items
 
-Please explicitly approve or request changes for:
-1. **[ ] Next.js full-stack modular monolith** instead of Next.js + NestJS split backend.
-2. **[ ] SQLite first + single-instance Docker** instead of PostgreSQL-required deployment.
-3. **[ ] Half-duplex Azure Speech browser MVP** instead of WebSocket/WebRTC full-duplex.
-4. **[ ] Provider adapter via Vercel AI SDK**, initial OpenAI-compatible LLM with Azure OpenAI extension.
-5. **[ ] Better Auth local email/password** for multi-user self-host.
-6. **[ ] Apache-2.0 license** (alternative MIT).
+Decisions 1–6 were explicitly approved by the maintainer on 2026-10-13. Items 7–8 and UX details remain subject to normal PR review:
+1. **[x] Next.js full-stack modular monolith** instead of Next.js + NestJS split backend.
+2. **[x] SQLite first + single-instance Docker** instead of PostgreSQL-required deployment.
+3. **[x] Half-duplex Azure Speech browser MVP** instead of WebSocket/WebRTC full-duplex.
+4. **[x] Provider adapter via Vercel AI SDK**, initial OpenAI-compatible LLM with Azure OpenAI extension.
+5. **[x] Better Auth local email/password** for multi-user self-host.
+6. **[x] Apache-2.0 license** (alternative MIT).
 7. **[ ] Transcript always saved with informed user consent; raw audio off by default.**
-8. **[ ] No code changes before plan approval**, P0 separate PR.
+8. **[ ] Confirm combined P0 implementation scope and 9-screen UX mockups before coding**, P0 application code in a separate PR.
 
 ## 14. Reference docs (for future implementation validation)
 
@@ -311,4 +313,4 @@ Please explicitly approve or request changes for:
 - Azure React example (archived; use as reference only): https://github.com/Azure-Samples/AzureSpeechReactSample
 
 ---
-**Review gate:** This document is a proposed architecture. Approval authorizes P0 planning/implementation in a **new PR**, not an unreviewed change to deployed code.
+**Review gate:** Six stack choices are approved. The P0/UI blueprint is ready for review in this combined PR; application implementation still belongs in a **separate code PR**, never silently added here.
