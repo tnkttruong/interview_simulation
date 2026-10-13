@@ -288,7 +288,7 @@ For P0 in this PR, the implementation must deliver:
 
 **P5 — Hardening:** security/privacy review, failure simulation, backup/restore, contribution cleanup, public release.
 
-Each PR includes tests + migration/docs updates when applicable. No huge single PR. Review the [combined P0 plan](./plans/P0_FOUNDATION_IMPLEMENTATION_PLAN.md) and UI mockups first; implement the P0 foundation in a separate code PR.
+Future PRs should include tests and migration/docs updates when applicable; prefer focused feature changes. The maintainer requested P0 architecture, UX mockups and executable foundation together in PR #1. Review the [combined P0 plan](./plans/P0_FOUNDATION_IMPLEMENTATION_PLAN.md).
 
 ## 13. Architecture decisions and remaining review items
 
