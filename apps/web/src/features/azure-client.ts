@@ -3,6 +3,8 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SDK=any;
 const url="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.52.0/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle-min.js";
+// SHA-256 digest pinned to the reviewed SDK bundle; a tampered CDN response is rejected.
+const speechIntegrity="sha256-PkbvyIZFDxlA/U2lyvNaNiqEYplTVuMbI8PGrFi6Ou4=";
 let loading:Promise<SDK>|undefined;
 export function loadAzureSdk():Promise<SDK>{
  if(typeof window==="undefined")return Promise.reject(new Error("Browser required"));
@@ -12,7 +14,7 @@ export function loadAzureSdk():Promise<SDK>{
  if(loading)return loading;
  loading=new Promise((resolve,reject)=>{
   const script=document.createElement("script");
-  script.src=url;script.async=true;script.crossOrigin="anonymous";
+  script.src=url;script.async=true;script.crossOrigin="anonymous";script.integrity=speechIntegrity;
   script.onload=()=>win.SpeechSDK?resolve(win.SpeechSDK):reject(new Error("Azure SDK missing"));
   script.onerror=()=>reject(new Error("Azure Speech CDN unavailable"));
   document.head.append(script);
