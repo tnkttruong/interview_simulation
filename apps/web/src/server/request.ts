@@ -2,6 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import pino from "pino";
+import { DomainError } from "@interview/core";
 import { auth } from "./auth";
 
 const logger = pino({
@@ -34,12 +35,12 @@ export function parsePage(request: Request) {
   const params = new URL(request.url).searchParams;
   const rawLimit = params.get("limit") ?? "20";
   const rawOffset = params.get("offset") ?? "0";
-  if (!/^\d+$/.test(rawLimit) || !/^\d+$/.test(rawOffset)) throw new Error("Invalid pagination");
+  if (!/^\d+$/.test(rawLimit) || !/^\d+$/.test(rawOffset)) throw new DomainError("invalid", "Invalid pagination");
   const limit = Number(rawLimit);
   const offset = Number(rawOffset);
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50 ||
       !Number.isSafeInteger(offset) || offset < 0 || offset > 10000) {
-    throw new Error("Invalid pagination");
+    throw new DomainError("invalid", "Invalid pagination");
   }
   return { limit, offset };
 }
@@ -49,16 +50,24 @@ export function errorResponse(message: string, status = 400) {
 }
 export function unauthorized() { return errorResponse("Authentication required", 401); }
 export function safeError(error: unknown) {
+  if (error instanceof DomainError) {
+    switch (error.kind) {
+      case "transition": return errorResponse(error.message, 409);
+      case "quota": return errorResponse(error.message, 409);
+      case "limit": return errorResponse(error.message, 429);
+      case "conflict": return errorResponse("Version or idempotency conflict", 409);
+      case "not_found": return errorResponse("Resource not found", 404);
+      case "invalid": return errorResponse("Request could not be completed", 400);
+    }
+  }
   if (error instanceof Error) {
-    if (error.message.startsWith("Invalid session transition")) return errorResponse(error.message, 409);
-    if (error.message === "Hourly creation limit reached" || error.message === "Scenario revision limit reached" ||
-        error.message === "Session transition limit reached") return errorResponse(error.message, 429);
-    if (error.message === "Account storage quota reached") return errorResponse(error.message, 409);
-    if (error.message.includes("conflict") || error.message.includes("Conflict")) return errorResponse("Version or idempotency conflict",409);
-    if (error.message.includes("not found")) return errorResponse("Resource not found",404);
+    if (error.name === "ZodError") return errorResponse("Invalid or missing fields", 400);
+    if (error instanceof SyntaxError) return errorResponse("Invalid or missing fields", 400);
+    // Database constraint violations surface as driver errors without a typed class.
     if (error.message.includes("UNIQUE constraint")) return errorResponse("Conflicting request", 409);
     if (error.message.includes("FOREIGN KEY constraint")) return errorResponse("Invalid reference", 400);
-    if (error.name === "ZodError") return errorResponse("Invalid or missing fields", 400);
   }
-  return errorResponse("Request could not be completed", 400);
+  // Unexpected failure: log only the error name (never message/stack, which may contain user data).
+  logger.error({ errorName: error instanceof Error ? error.name : "unknown" }, "api.unexpected_error");
+  return errorResponse("Request could not be completed", 500);
 }

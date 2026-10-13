@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { and, count, desc, eq, gte } from "drizzle-orm";
 import { z } from "zod";
-import { getDemoQuestion, maxDemoTurns, transition, validateSpeechConfig, type SessionState } from "@interview/core";
+import { DomainError, getDemoQuestion, maxDemoTurns, transition, validateSpeechConfig, type SessionState } from "@interview/core";
 import { db } from "./db/client";
 import { interviewSessions, interviewTurns, scenarioRevisions, scenarios, workflowEvents } from "./db/schema";
 
@@ -35,8 +35,8 @@ const MAX_SESSIONS_PER_OWNER = 300;
 const MAX_SCENARIO_REVISIONS = 20;
 const MAX_SESSION_STATE_CHANGES = 100;
 function requireCreationCapacity(total: number, recent: number, maxTotal: number, maxHourly: number) {
-  if (total >= maxTotal) throw new Error("Account storage quota reached");
-  if (recent >= maxHourly) throw new Error("Hourly creation limit reached");
+  if (total >= maxTotal) throw new DomainError("quota", "Account storage quota reached");
+  if (recent >= maxHourly) throw new DomainError("limit", "Hourly creation limit reached");
 }
 
 
@@ -51,13 +51,13 @@ function addEvent(tx: Pick<typeof db, "select" | "insert">, sessionId: string, t
 function requireOwnedScenario(ownerId: UserId, scenarioId: string) {
   const row = db.select().from(scenarios)
     .where(and(eq(scenarios.id, scenarioId), eq(scenarios.ownerId, ownerId))).get();
-  if (!row) throw new Error("Scenario not found");
+  if (!row) throw new DomainError("not_found", "Scenario not found");
   return row;
 }
 function requireOwnedSession(ownerId: UserId, sessionId: string) {
   const row = db.select().from(interviewSessions)
     .where(and(eq(interviewSessions.id, sessionId), eq(interviewSessions.ownerId, ownerId))).get();
-  if (!row) throw new Error("Session not found");
+  if (!row) throw new DomainError("not_found", "Session not found");
   return row;
 }
 export function listScenarios(ownerId: UserId, limit: number, offset: number) {
@@ -94,10 +94,10 @@ export function changeScenario(ownerId: UserId, id: string, payload: unknown) {
   ]).parse(payload);
   return db.transaction((tx) => {
     const scenario = tx.select().from(scenarios).where(and(eq(scenarios.id,id),eq(scenarios.ownerId,ownerId))).get();
-    if (!scenario) throw new Error("Scenario not found");
-    if (scenario.latestRevision !== input.expectedRevision) throw new Error("Scenario revision conflict");
+    if (!scenario) throw new DomainError("not_found", "Scenario not found");
+    if (scenario.latestRevision !== input.expectedRevision) throw new DomainError("conflict", "Scenario revision conflict");
     if (input.action === "revise") {
-      if (scenario.latestRevision >= MAX_SCENARIO_REVISIONS) throw new Error("Scenario revision limit reached");
+      if (scenario.latestRevision >= MAX_SCENARIO_REVISIONS) throw new DomainError("limit", "Scenario revision limit reached");
       const revision = scenario.latestRevision + 1;
       tx.insert(scenarioRevisions).values({ scenarioId:id, revision, notes:input.notes, approvedAt:null }).run();
       tx.update(scenarios).set({ latestRevision: revision }).where(eq(scenarios.id,id)).run();
@@ -137,7 +137,7 @@ export function createSession(ownerId: UserId, payload: unknown) {
       .where(and(eq(interviewSessions.ownerId,ownerId),eq(interviewSessions.requestKey,input.requestKey))).get();
     if (existing) {
       if (existing.scenarioId !== input.scenarioId || existing.scenarioRevision !== input.revision ||
-          existing.speechConfig !== JSON.stringify(speech)) throw new Error("Request key conflict");
+          existing.speechConfig !== JSON.stringify(speech)) throw new DomainError("conflict", "Request key conflict");
       return getSession(ownerId,existing.id);
     }
     const total = tx.select({value:count()}).from(interviewSessions)
@@ -146,22 +146,24 @@ export function createSession(ownerId: UserId, payload: unknown) {
       gte(interviewSessions.createdAt,now()-HOUR_MS))).get()!.value;
     requireCreationCapacity(total,recent,MAX_SESSIONS_PER_OWNER,MAX_SESSIONS_PER_HOUR);
     const scenario = tx.select().from(scenarios).where(and(eq(scenarios.id,input.scenarioId),eq(scenarios.ownerId,ownerId))).get();
-    if (!scenario || scenario.latestRevision !== input.revision) throw new Error("Latest scenario revision required");
+    if (!scenario || scenario.latestRevision !== input.revision) throw new DomainError("invalid", "Latest scenario revision required");
     const approved = tx.select().from(scenarioRevisions).where(and(
       eq(scenarioRevisions.scenarioId,scenario.id),eq(scenarioRevisions.revision,input.revision)
     )).get();
-    if (!approved?.approvedAt) throw new Error("Scenario approval required");
+    if (!approved?.approvedAt) throw new DomainError("invalid", "Scenario approval required");
     const record = { id:randomUUID(), ownerId, scenarioId:scenario.id, scenarioRevision:input.revision,
       requestKey:input.requestKey, speechConfig:JSON.stringify(speech),
       state:"CREATED", version:1, createdAt:now() };
     tx.insert(interviewSessions).values(record).run();
     addEvent(tx,record.id,"session.created",{scenarioRevision:input.revision});
     let state: SessionState = "CREATED";
+    let version = 1;
     for (const [action,type] of [["enterPreflight","preflight.entered"],["skipDemoPreflight","preflight.demo_skipped"],["start","interview.started"]] as const) {
       state = transition(state,action);
+      version += 1;
       addEvent(tx,record.id,type,{mode:"demo"});
     }
-    tx.update(interviewSessions).set({state,version:4}).where(eq(interviewSessions.id,record.id)).run();
+    tx.update(interviewSessions).set({state,version}).where(eq(interviewSessions.id,record.id)).run();
     return getSession(ownerId,record.id);
   });
 }
@@ -170,21 +172,21 @@ export function submitAnswer(ownerId: UserId, id: string, payload: unknown) {
   return db.transaction((tx) => {
     const session = tx.select().from(interviewSessions)
       .where(and(eq(interviewSessions.id,id),eq(interviewSessions.ownerId,ownerId))).get();
-    if (!session) throw new Error("Session not found");
+    if (!session) throw new DomainError("not_found", "Session not found");
     const existing = tx.select().from(interviewTurns)
       .where(and(eq(interviewTurns.sessionId,id),eq(interviewTurns.clientTurnId,input.clientTurnId))).get();
     if (existing) {
       // The idempotency key is bound to the normalized command, not just the turn ID.
       if (existing.answer !== input.answer || existing.answerSource !== input.source || existing.originalStt !== null || existing.sequence !== input.expectedTurnSequence)
-        throw new Error("Answer request key conflict");
+        throw new DomainError("conflict", "Answer request key conflict");
       return getSession(ownerId,id);
     }
-    if (session.state !== "IN_PROGRESS") throw new Error("Session is not accepting answers");
+    if (session.state !== "IN_PROGRESS") throw new DomainError("invalid", "Session is not accepting answers");
     const last = tx.select({ sequence: interviewTurns.sequence }).from(interviewTurns)
       .where(eq(interviewTurns.sessionId,id)).orderBy(desc(interviewTurns.sequence)).limit(1).get();
     const sequence = (last?.sequence ?? 0) + 1;
-    if (sequence > maxDemoTurns) throw new Error("Demo turn limit reached");
-    if (sequence !== input.expectedTurnSequence) throw new Error("Stale question conflict");
+    if (sequence > maxDemoTurns) throw new DomainError("invalid", "Demo turn limit reached");
+    if (sequence !== input.expectedTurnSequence) throw new DomainError("conflict", "Stale question conflict");
     const speech = validateSpeechConfig(JSON.parse(session.speechConfig));
     tx.insert(interviewTurns).values({
       id:randomUUID(), sessionId:id, clientTurnId:input.clientTurnId, sequence,
@@ -201,10 +203,10 @@ export function changeSession(ownerId:UserId,id:string,payload:unknown) {
   return db.transaction((tx) => {
     const row = tx.select().from(interviewSessions)
       .where(and(eq(interviewSessions.id,id),eq(interviewSessions.ownerId,ownerId))).get();
-    if (!row) throw new Error("Session not found");
-    if (row.version !== input.expectedVersion) throw new Error("Session version conflict");
+    if (!row) throw new DomainError("not_found", "Session not found");
+    if (row.version !== input.expectedVersion) throw new DomainError("conflict", "Session version conflict");
     if (row.version >= MAX_SESSION_STATE_CHANGES && input.action !== "finish" && input.action !== "cancel")
-      throw new Error("Session transition limit reached");
+      throw new DomainError("limit", "Session transition limit reached");
     const state = transition(row.state as SessionState,input.action);
     tx.update(interviewSessions).set({state,version:row.version+1}).where(eq(interviewSessions.id,id)).run();
     addEvent(tx,id,"interview."+input.action,{from:row.state,to:state});

@@ -6,7 +6,8 @@ COPY apps/web/package.json apps/web/package.json
 COPY packages/interview-core/package.json packages/interview-core/package.json
 RUN pnpm install --frozen-lockfile
 COPY . .
-# Required config is validated at runtime, not during static compilation
+# Required config is validated at runtime, not during static compilation.
+# This placeholder exists only in the builder stage and is NOT copied into the runner image.
 ENV DEMO_MODE=true
 ENV BETTER_AUTH_SECRET=build-only-placeholder-secret-minimum-32-character-length
 RUN pnpm build
@@ -20,4 +21,5 @@ COPY --from=builder --chown=node:node /source/apps/web/.next/static ./apps/web/.
 COPY --from=builder --chown=node:node /source/apps/web/scripts ./apps/web/scripts
 USER node
 EXPOSE 3000
+HEALTHCHECK --interval=15s --timeout=5s --retries=5 CMD node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["sh","-c","node apps/web/scripts/migrate.mjs && exec node apps/web/server.js"]

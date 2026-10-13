@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { DomainError } from "./errors";
 export * from "./ports";
+export * from "./errors";
 
 export const supportedLocales = ["en-US", "en-GB", "vi-VN"] as const;
 export const voiceByLocale = {
@@ -20,7 +22,7 @@ export function validateSpeechConfig(input: unknown): SpeechConfig {
   const config = speechConfigSchema.parse(input);
   const voices: readonly string[] = voiceByLocale[config.interviewerLocale];
   if (!voices.includes(config.interviewerVoiceId)) {
-    throw new Error("Selected voice does not match interviewer language");
+    throw new DomainError("invalid", "Selected voice does not match interviewer language");
   }
   return config;
 }
@@ -43,7 +45,7 @@ const transitionRules: Partial<Record<SessionState, Record<string, SessionState>
 };
 export function transition(current: SessionState, action: string): SessionState {
   const next = transitionRules[current]?.[action];
-  if (!next) throw new Error(`Invalid session transition: ${current} -> ${action}`);
+  if (!next) throw new DomainError("transition", `Invalid session transition: ${current} -> ${action}`);
   return next;
 }
 export const demoQuestions = [
