@@ -7,11 +7,14 @@ import { voiceByLocale } from "@interview/core";
 type Locale = keyof typeof voiceByLocale;
 type Screen = "dashboard"|"new"|"scenario"|"preflight"|"meeting"|"paused"|"results"|"history";
 type Scenario = {id:string;role:string;jobDescription:string;focus:string;latestRevision:number;revisions:{revision:number;approvedAt:number|null;notes:string}[]};
+type ScenarioSummary = Pick<Scenario,"id"|"role"|"focus"|"latestRevision">;
+type Page<T> = {items:T[];total:number;nextOffset:number|null};
 type Session = {id:string;scenarioId:string;scenarioRevision:number;state:string;version:number;createdAt:number;
   speechConfig:string;scenario?:{role:string;focus:string};nextQuestion?:string|null;
   turns?:{id:string;sequence:number;question:string;answer:string;answerSource:string;originalStt:string|null;createdAt:number}[]};
 type Event = {id:string;seq:number;type:string;timestamp:number;metadata:string};
 
+class ApiError extends Error { constructor(message:string,readonly status:number){super(message);} }
 const client=createAuthClient();
 const labels: [Screen,string][]=[["dashboard","Dashboard"],["new","New interview"],["scenario","Scenario review"],
   ["preflight","Language & voice"],["meeting","Live meeting"],["paused","Pause / resume"],["results","Results"],["history","History & audit"]];
@@ -19,18 +22,23 @@ async function api<T>(url:string,options?:RequestInit):Promise<T>{
   const result=await fetch(url,{credentials:"same-origin",...options,
     headers:{"Content-Type":"application/json",...(options?.headers??{})}});
   const data=await result.json();
-  if(!result.ok)throw new Error(data.error??`HTTP ${result.status}`);
+  if(!result.ok)throw new ApiError(data.error??`HTTP ${result.status}`,result.status);
   return data as T;
 }
 const toDate=(ts:number)=>new Date(ts).toLocaleString();
 export default function Workspace({userEmail}:{userEmail:string}) {
   const [screen,setScreen]=useState<Screen>("dashboard");
   const [hydrated,setHydrated]=useState(false);
-  const [scenarios,setScenarios]=useState<Scenario[]>([]);
+  const [scenarios,setScenarios]=useState<ScenarioSummary[]>([]);
+  const [scenarioTotal,setScenarioTotal]=useState(0);
+  const [scenarioNext,setScenarioNext]=useState<number|null>(null);
   const [sessions,setSessions]=useState<Session[]>([]);
+  const [sessionTotal,setSessionTotal]=useState(0);
+  const [sessionNext,setSessionNext]=useState<number|null>(null);
   const [scenario,setScenario]=useState<Scenario|null>(null);
   const [session,setSession]=useState<Session|null>(null);
   const [events,setEvents]=useState<Event[]>([]);
+  const [eventsSessionId,setEventsSessionId]=useState<string|null>(null);
   const [role,setRole]=useState("Senior Backend Engineer");
   const [focus,setFocus]=useState("Node.js, PostgreSQL, system design");
   const [jd,setJd]=useState("Design reliable backend services, debug database performance, mentor engineers and communicate trade-offs.");
@@ -48,10 +56,26 @@ export default function Workspace({userEmail}:{userEmail:string}) {
   const answerKeyRef=useRef<string|null>(null);
 
   const refresh=useCallback(async()=>{
-    const [a,b]=await Promise.all([api<Scenario[]>("/api/demo/scenarios"),api<Session[]>("/api/demo/sessions")]);
-    setScenarios(a);setSessions(b);
+    const [a,b]=await Promise.all([api<Page<ScenarioSummary>>("/api/demo/scenarios?limit=20"),api<Page<Session>>("/api/demo/sessions?limit=20")]);
+    setScenarios(a.items);setScenarioTotal(a.total);setScenarioNext(a.nextOffset);
+    setSessions(b.items);setSessionTotal(b.total);setSessionNext(b.nextOffset);
   },[]);
   useEffect(()=>{setHydrated(true);refresh().catch(e=>setError(String(e)));},[refresh]);
+  async function loadMore(kind:"scenarios"|"sessions"){
+    const offset=kind==="scenarios"?scenarioNext:sessionNext;
+    if(offset===null)return;
+    await run(async()=>{
+      if(kind==="scenarios"){
+        const page=await api<Page<ScenarioSummary>>("/api/demo/scenarios?limit=20&offset="+offset);
+        setScenarios(prev=>[...prev,...page.items.filter(row=>!prev.some(existing=>existing.id===row.id))]);
+        setScenarioTotal(page.total);setScenarioNext(page.nextOffset);
+      }else{
+        const page=await api<Page<Session>>("/api/demo/sessions?limit=20&offset="+offset);
+        setSessions(prev=>[...prev,...page.items.filter(row=>!prev.some(existing=>existing.id===row.id))]);
+        setSessionTotal(page.total);setSessionNext(page.nextOffset);
+      }
+    });
+  }
   async function run(task:()=>Promise<void>){
     if(busy)return;
     setBusy(true);setError("");
@@ -61,12 +85,12 @@ export default function Workspace({userEmail}:{userEmail:string}) {
   async function create(){
     await run(async()=>{
       const created=await api<Scenario>("/api/demo/scenarios",{method:"POST",body:JSON.stringify({role,jobDescription:jd,focus})});
-      setScenario(await api<Scenario>(`/api/demo/scenarios/${created.id}`));requestKeyRef.current=null;
+      setScenario(await api<Scenario>(`/api/demo/scenarios/${created.id}`));requestKeyRef.current=null;setConsent(false);
       setNotice("Deterministic demo scenario created; no LLM called.");setScreen("scenario");await refresh();
     });
   }
   async function openScenario(id:string){
-    await run(async()=>{setScenario(await api<Scenario>(`/api/demo/scenarios/${id}`));setScreen("scenario");});
+    await run(async()=>{setScenario(await api<Scenario>(`/api/demo/scenarios/${id}`));setConsent(false);requestKeyRef.current=null;setScreen("scenario");});
   }
   async function changeScenario(action:"approve"|"revise"){
     if(!scenario)return;
@@ -76,7 +100,7 @@ export default function Workspace({userEmail}:{userEmail:string}) {
       })});
       setScenario(next);setRevisionNotes("");
       setNotice(action==="approve"?"Scenario approved. You can configure your meeting.":"New draft revision created. Approval is required again.");
-      if(action==="approve")setScreen("preflight");
+      if(action==="approve"){setConsent(false);requestKeyRef.current=null;setScreen("preflight");}
       await refresh();
     });
   }
@@ -95,14 +119,15 @@ export default function Workspace({userEmail}:{userEmail:string}) {
         scenarioId:scenario.id,revision:scenario.latestRevision,requestKey:requestKeyRef.current,
         speech:{interviewerLocale,interviewerVoiceId:voice,candidateSttLocale:candidateLocale,consentToTranscript:consent}
       })});
-      setSession(created);requestKeyRef.current=null;setScreen("meeting");setNotice("Demo interview started. No audio is captured.");
+      setSession(created);setEvents([]);setEventsSessionId(null);setConsent(false);requestKeyRef.current=null;setScreen("meeting");setNotice("Demo interview started. No audio is captured.");
       await refresh();
     });
   }
   async function openSession(id:string){
     await run(async()=>{
       const selected=await api<Session>(`/api/demo/sessions/${id}`);
-      setSession(selected);setScreen(selected.state==="PAUSED"?"paused":selected.state==="COMPLETED"?"results":"meeting");
+      setSession(selected);setEvents([]);setEventsSessionId(null);setAnswer("");answerKeyRef.current=null;
+      setScreen(selected.state==="PAUSED"||selected.state==="INTERRUPTED"?"paused":selected.state==="COMPLETED"?"results":"meeting");
     });
   }
   async function sessionAction(action:"pause"|"resume"|"finish"|"cancel"){
@@ -120,9 +145,21 @@ export default function Workspace({userEmail}:{userEmail:string}) {
     if(!session||!answer.trim())return;
     await run(async()=>{
       if(!answerKeyRef.current)answerKeyRef.current=crypto.randomUUID();
-      const updated=await api<Session>(`/api/demo/sessions/${session.id}/turns`,{
-        method:"POST",body:JSON.stringify({clientTurnId:answerKeyRef.current,answer,source:"typed"})
-      });
+      const submittedAnswer=answer;
+      const expectedTurnSequence=(session.turns?.length??0)+1;
+      let updated:Session;
+      try {
+        updated=await api<Session>(`/api/demo/sessions/${session.id}/turns`,{
+          method:"POST",body:JSON.stringify({clientTurnId:answerKeyRef.current,expectedTurnSequence,answer:submittedAnswer,source:"typed"})
+        });
+      } catch(error) {
+        if(error instanceof ApiError&&error.status===409){
+          setSession(await api<Session>(`/api/demo/sessions/${session.id}`));
+          setAnswer("");answerKeyRef.current=null;
+          throw new Error("This interview moved to another question. Stale answer discarded; review the current question.");
+        }
+        throw error;
+      }
       setSession(updated);setAnswer("");answerKeyRef.current=null;
       setNotice("Answer and workflow event saved to your local SQLite DB.");
     });
@@ -130,19 +167,22 @@ export default function Workspace({userEmail}:{userEmail:string}) {
   async function showEvents(){
     if(!session)return;
     await run(async()=>{
-      const list=await api<Event[]>(`/api/demo/sessions/${session.id}?include=events`);
-      setEvents(list);setScreen("history");
+      const selectedId=session.id;
+      setEventsSessionId(null);setEvents([]);
+      const list=await api<Event[]>(`/api/demo/sessions/${selectedId}?include=events`);
+      setEvents(list);setEventsSessionId(selectedId);setScreen("history");
     });
   }
   const approved=!!scenario?.revisions.find(r=>r.revision===scenario.latestRevision)?.approvedAt;
   const active=screen==="meeting"&&session?.state==="IN_PROGRESS";
   const canAnswer=active&&typeof session?.nextQuestion==="string";
+  const recoverable=session?.state==="PAUSED"||session?.state==="INTERRUPTED";
   return <div className="shell" data-testid="workspace-shell" data-hydrated={hydrated?"true":"false"}>
     <aside className="sidebar">
       <div className="brand">◉ <strong>Interview<br/>Simulation</strong></div>
       <div className="side-caption">OPEN-SOURCE · P0 DEMO</div>
       <nav aria-label="Main navigation">{labels.map(([name,label])=>
-        <button key={name} className={screen===name?"active":""} onClick={()=>{setError("");setScreen(name);}}>{label}</button>)}</nav>
+        <button key={name} className={screen===name?"active":""} onClick={()=>{setError("");if(name==="scenario"||name==="new"){setScenario(null);setConsent(false);}setScreen(name);}}>{label}</button>)}</nav>
       <div className="sidebar-bottom"><small>Offline mock prompts. No STT, TTS or LLM calls.</small></div>
     </aside>
     <div className="main-area">
@@ -155,9 +195,9 @@ export default function Workspace({userEmail}:{userEmail:string}) {
         {screen==="dashboard"&&<section><p className="eyebrow">01 / Dashboard</p><h1>Your interview workspace</h1>
           <p className="lead">Prepare with a job description, approve your questions, and practice a deterministic mock interview.</p>
           <div className="hero"><div><h2>Ready for your next interview?</h2><p>Practice without a paid Azure or LLM API key.</p></div><button className="btn primary" onClick={()=>setScreen("new")}>+ Create interview</button></div>
-          <div className="stats"><article className="panel"><span>Scenarios</span><strong>{scenarios.length}</strong></article>
-            <article className="panel"><span>Sessions</span><strong>{sessions.length}</strong></article>
-            <article className="panel"><span>Completed</span><strong>{sessions.filter(s=>s.state==="COMPLETED").length}</strong></article></div>
+          <div className="stats"><article className="panel"><span>Scenarios</span><strong>{scenarioTotal}</strong></article>
+            <article className="panel"><span>Sessions</span><strong>{sessionTotal}</strong></article>
+            <article className="panel"><span>Completed (loaded)</span><strong>{sessions.filter(s=>s.state==="COMPLETED").length}</strong></article></div>
           <div className="panel"><h2>Recent sessions</h2>{sessions.length===0?<p className="muted">No interviews yet. Create one to begin.</p>:
             sessions.slice(0,5).map(s=><button className="list-button" key={s.id} onClick={()=>openSession(s.id)}>{toDate(s.createdAt)} · {s.state} →</button>)}</div>
         </section>}
@@ -173,6 +213,7 @@ export default function Workspace({userEmail}:{userEmail:string}) {
         {screen==="scenario"&&<section><p className="eyebrow">03 / Scenario planning</p><h1>Review & approve</h1>
           {!scenario?<div className="panel"><p>Select an existing scenario or create a new one.</p>{scenarios.map(s=>
             <button className="list-button" key={s.id} onClick={()=>openScenario(s.id)}>{s.role} · v{s.latestRevision}</button>)}
+            {scenarioNext!==null&&<button className="btn secondary" disabled={busy} onClick={()=>loadMore("scenarios")}>Load more scenarios</button>}
             <button className="btn primary" onClick={()=>setScreen("new")}>Create new</button></div>:
           <div className="cols"><div className="panel">
             <span className="pill">{approved?"Approved":"Draft"} v{scenario.latestRevision}</span>
@@ -229,10 +270,10 @@ export default function Workspace({userEmail}:{userEmail:string}) {
               <strong>You · {t.answerSource}</strong><p>{t.answer}</p></div>)}
             {session.turns?.length===0&&<p className="muted">Waiting for your first answer.</p>}</div></div>}
         </section>}
-        {screen==="paused"&&<section><p className="eyebrow">06 / Recovery</p><h1>Interview paused</h1><div className="panel">
+        {screen==="paused"&&<section><p className="eyebrow">06 / Recovery</p><h1>{session?.state==="INTERRUPTED"?"Interview interrupted":"Interview paused"}</h1><div className="panel">
           <p>Answers are saved in SQLite. Resuming continues from the next scripted question; already-committed turns are not duplicated.</p>
-          <button className="btn primary" disabled={!session||session.state!=="PAUSED"||busy} onClick={()=>sessionAction("resume")}>▶ Resume meeting</button>
-          <button className="btn secondary" disabled={!session||busy||session.state!=="PAUSED"} onClick={()=>sessionAction("finish")}>End without resuming</button></div>
+          <button className="btn primary" disabled={!recoverable||busy} onClick={()=>sessionAction("resume")}>▶ Resume meeting</button>
+          <button className="btn secondary" disabled={!recoverable||busy} onClick={()=>sessionAction("finish")}>End without resuming</button></div>
         </section>}
         {screen==="results"&&<section><p className="eyebrow">07 / Practice feedback</p><h1>Session summary</h1>
           <div className="panel"><h2>{session?.state==="COMPLETED"?"Practice completed":"Evaluation unavailable"}</h2>
@@ -243,10 +284,11 @@ export default function Workspace({userEmail}:{userEmail:string}) {
         {screen==="history"&&<section><p className="eyebrow">08 / History & audit</p><h1>Durable session history</h1>
           <div className="panel"><h2>Sessions</h2>{sessions.length===0?<p className="muted">No practice sessions recorded yet.</p>:
             sessions.map(s=><button key={s.id} className="list-button" onClick={()=>openSession(s.id)}>
-              {toDate(s.createdAt)} · {s.state} · scenario revision {s.scenarioRevision} →</button>)}</div>
+              {toDate(s.createdAt)} · {s.state} · scenario revision {s.scenarioRevision} →</button>)}
+            {sessionNext!==null&&<button className="btn secondary" disabled={busy} onClick={()=>loadMore("sessions")}>Load more sessions</button>}</div>
           {session&&<div className="panel"><h2>Selected session evidence</h2>
             <button className="btn secondary" onClick={showEvents} disabled={busy}>Load sanitized workflow events</button>
-            {events.map(e=><p className="event" key={e.id}>{e.seq} · {e.type} · {toDate(e.timestamp)}</p>)}
+            {eventsSessionId===session.id&&events.map(e=><p className="event" key={e.id}>{e.seq} · {e.type} · {toDate(e.timestamp)}</p>)}
             <p className="muted small">ZIP export and independent AI workflow audit are planned for P4, not available in P0.</p></div>}
         </section>}
         <footer>Open source P0 demo · AI generation (P1) · Azure Speech (P2) · Evaluation and audit ZIP (P4)</footer>
