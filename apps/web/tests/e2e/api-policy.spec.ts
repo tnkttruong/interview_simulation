@@ -185,7 +185,7 @@ test("scoped pagination omits sensitive JD and enforces creation rate limits", a
   expect((await page.request.post("/api/demo/scenarios",{data:{
     role:"Backend Engineer",jobDescription:"Build reliable scalable services",focus:""
   }})).status()).toBe(429);
-  const second=await (await page.request.get("/api/demo/scenarios?limit=1&offset=1")).json()
+  const second=(await (await page.request.get("/api/demo/scenarios?limit=1&offset=1")).json())
     as {items:unknown[];total:number;nextOffset:number|null};
   expect(second.items).toHaveLength(1);
   expect(second.total).toBe(12);
