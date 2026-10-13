@@ -17,7 +17,6 @@ const startInput = z.object({
   revision: z.number().int().positive(),
   requestKey: z.string().uuid(),
   speech: z.unknown(),
-  mode: z.enum(["demo","live"]).default("demo"),
 });
 const answerInput = z.object({
   clientTurnId: z.string().uuid(),
@@ -138,7 +137,7 @@ export function getSession(ownerId:UserId, id:string) {
     nextQuestion: session.state === "IN_PROGRESS" && turns.length < maxDemoTurns
       ? (session.mode === "live" ? upcoming?.question ?? null : getDemoQuestion(turns.length, speech.interviewerLocale)) : null };
 }
-export function createSession(ownerId: UserId, payload: unknown) {
+export function createSession(ownerId: UserId, payload: unknown, mode: "demo" | "live" = "demo") {
   const input = startInput.parse(payload);
   const speech = validateSpeechConfig(input.speech);
   return db.transaction((tx) => {
@@ -146,7 +145,7 @@ export function createSession(ownerId: UserId, payload: unknown) {
       .where(and(eq(interviewSessions.ownerId,ownerId),eq(interviewSessions.requestKey,input.requestKey))).get();
     if (existing) {
       if (existing.scenarioId !== input.scenarioId || existing.scenarioRevision !== input.revision ||
-          existing.speechConfig !== JSON.stringify(speech) || existing.mode !== input.mode) throw new DomainError("conflict", "Request key conflict");
+          existing.speechConfig !== JSON.stringify(speech) || existing.mode !== mode) throw new DomainError("conflict", "Request key conflict");
       return getSession(ownerId,existing.id);
     }
     const total = tx.select({value:count()}).from(interviewSessions)
@@ -161,13 +160,13 @@ export function createSession(ownerId: UserId, payload: unknown) {
     )).get();
     if (!approved?.approvedAt) throw new DomainError("invalid", "Scenario approval required");
     const record = { id:randomUUID(), ownerId, scenarioId:scenario.id, scenarioRevision:input.revision,
-      requestKey:input.requestKey, speechConfig:JSON.stringify(speech), mode:input.mode,
+      requestKey:input.requestKey, speechConfig:JSON.stringify(speech), mode:mode,
       state:"CREATED", version:1, createdAt:now() };
     tx.insert(interviewSessions).values(record).run();
-    addEvent(tx,record.id,"session.created",{scenarioRevision:input.revision,mode:input.mode});
+    addEvent(tx,record.id,"session.created",{scenarioRevision:input.revision,mode:mode});
     let state: SessionState = "CREATED";
     let version = 1;
-    for (const [action,type] of [["enterPreflight","preflight.entered"],["skipDemoPreflight",input.mode==="live"?"preflight.client_reported":"preflight.demo_skipped"],["start","interview.started"]] as const) {
+    for (const [action,type] of [["enterPreflight","preflight.entered"],["skipDemoPreflight",mode==="live"?"preflight.client_reported":"preflight.demo_skipped"],["start","interview.started"]] as const) {
       state = transition(state,action);
       version += 1;
       addEvent(tx,record.id,type,{mode:"demo"});

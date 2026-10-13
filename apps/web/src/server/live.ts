@@ -65,7 +65,7 @@ export function startLive(ownerId:string,input:unknown) {
  // Keep legacy start, approval, snapshot, ownership and idempotency invariants.
  planFor(data.scenarioId,data.revision);
  validateSpeechConfig(data.speech);
- return createSession(ownerId,{...data,mode:"live"});
+ return createSession(ownerId,data,"live");
 }
 export async function prepareLiveQuestion(ownerId:string,id:string){
  const session=owned(id,ownerId);
