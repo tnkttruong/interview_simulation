@@ -129,3 +129,13 @@ export const aiSettings=sqliteTable("ai_settings",{
   voiceId:text("voice_id").notNull(),
   updatedAt:integer("updated_at").notNull()
 });
+
+export const aiCallAttempts=sqliteTable("ai_call_attempts",{
+ id:text("id").primaryKey(),
+ ownerId:text("owner_id").notNull().references(()=>user.id,{onDelete:"cascade"}),
+ operationKey:text("operation_key").notNull(),
+ status:text("status").notNull(),
+ startedAt:integer("started_at").notNull(),
+ expiresAt:integer("expires_at").notNull(),
+ finishedAt:integer("finished_at")
+});
