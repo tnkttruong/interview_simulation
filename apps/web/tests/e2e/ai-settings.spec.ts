@@ -18,7 +18,7 @@ test("account saves and reloads AI provider/model/language preferences",async({p
  await page.getByLabel("Default interviewer language").selectOption("vi-VN");
  await page.getByLabel("Default candidate speech language").selectOption("en-GB");
  await page.getByRole("button",{name:"Save AI settings"}).click();
- await expect(page.getByText("Defaults saved for your account.")).toBeVisible();
+ await expect(page.getByText(/Defaults saved for your account/)).toBeVisible();
  await page.reload();
  await expect(page.getByLabel("AI model")).toHaveValue("ci-mock-model");
  await expect(page.getByLabel("Default interviewer language")).toHaveValue("vi-VN");
