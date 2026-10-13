@@ -32,6 +32,8 @@ const MAX_SCENARIOS_PER_HOUR = 12;
 const MAX_SCENARIOS_PER_OWNER = 100;
 const MAX_SESSIONS_PER_HOUR = 30;
 const MAX_SESSIONS_PER_OWNER = 300;
+const MAX_SCENARIO_REVISIONS = 20;
+const MAX_SESSION_STATE_CHANGES = 100;
 function requireCreationCapacity(total: number, recent: number, maxTotal: number, maxHourly: number) {
   if (total >= maxTotal) throw new Error("Account storage quota reached");
   if (recent >= maxHourly) throw new Error("Hourly creation limit reached");
