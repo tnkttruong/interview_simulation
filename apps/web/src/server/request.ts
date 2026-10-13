@@ -51,7 +51,8 @@ export function unauthorized() { return errorResponse("Authentication required",
 export function safeError(error: unknown) {
   if (error instanceof Error) {
     if (error.message.startsWith("Invalid session transition")) return errorResponse(error.message, 409);
-    if (error.message === "Hourly creation limit reached") return errorResponse(error.message, 429);
+    if (error.message === "Hourly creation limit reached" || error.message === "Scenario revision limit reached" ||
+        error.message === "Session transition limit reached") return errorResponse(error.message, 429);
     if (error.message === "Account storage quota reached") return errorResponse(error.message, 409);
     if (error.message.includes("conflict") || error.message.includes("Conflict")) return errorResponse("Version or idempotency conflict",409);
     if (error.message.includes("not found")) return errorResponse("Resource not found",404);
