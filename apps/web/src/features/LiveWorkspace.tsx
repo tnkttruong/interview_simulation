@@ -296,6 +296,13 @@ export default function LiveWorkspace({email}:{email:string}){
       {(session?.turns||[]).map(t=><div className="turn" key={t.id}><b>Q{t.sequence}</b><p>{t.question}</p><p>{t.answer}</p></div>)}
       <button className="btn secondary" onClick={()=>{setSession(null);setStep("prepare");}}>New interview</button>
      </section>}
+    <div className="panel"><h3>Your data</h3>
+     <p className="muted small">Stored CV text, scenarios, interview transcript and evidence can be erased. This deletes both demo and live interviews for your account and cannot be undone.</p>
+     <button className="btn danger" disabled={busy} onClick={()=>{if(window.prompt("Type DELETE ALL MY INTERVIEW DATA to permanently delete all your scenarios and sessions")!=="DELETE ALL MY INTERVIEW DATA")return;
+       void run(async()=>{await api("/api/me/data",{method:"DELETE",body:JSON.stringify({confirm:"DELETE ALL MY INTERVIEW DATA"})});
+         setScenario(null);setPlan(null);setSession(null);setHistory([]);setStep("prepare");setMessage("Your interview data has been deleted.");});}}>
+       Delete my interview data</button>
+    </div>
     <footer>AI planning (P1) · Azure browser speech (P2) · Adaptive interview and hints (P3) · Evaluation and audit: P4</footer>
    </main></div></div>;
 }

@@ -2,7 +2,7 @@
 
 Open-source, self-hosted mock interview web application.
 
-**Current phase: P0 demo foundation.** This runs a real Next.js + Better Auth + SQLite application, with deterministic mock interviewer questions, explicit scenario approval, independent speech settings and durable text-based interviews. It **does not** connect to an LLM or Azure Speech yet and does not claim to score real candidates.
+**Current phase: P0 offline demo plus experimental P1–P3 live interview in /live.** P0 requires no paid keys. Live mode supports CV/JD-driven planning, revision/approval, Azure Speech STT/TTS, follow-up questions and optional hints; it needs your LLM/Azure credentials. Production cloud interoperability has not yet been validated with real subscriptions. P4 scoring and independent audit ZIP are not implemented.
 
 ## Architecture
 
@@ -45,11 +45,11 @@ One container serves Next and SQLite. `interview_data` named volume is persisten
 
 Create scenario from JD → revise and explicitly approve the latest immutable version → set AI spoken language and voice independently of candidate input/STT language → explicitly consent to storing transcript → Start → answer by text → pause/resume/end → inspect history/events. The preflight mic and voice preview are *mock buttons*; neither asks browser permission nor records audio. Typed answers are durable and requests have idempotency keys; reusing a key with a different answer returns HTTP 409. P0 emits `preflight.demo_skipped` instead of claiming a real microphone check passed. Scripted interviewer question text respects the selected language (English or Vietnamese), while the candidate input locale remains independent. Each demo session accepts at most 15 answers.
 
-**No AI/voice guarantee**: P1 adds CV parsing and real LLM scenario generation; P2 adds Azure Speech browser STT/TTS, preflight hardware checks and durable voice turns; P3 adds adaptive questioning and hints; P4 adds evidence-scored reports and external audit ZIP. These later phases require the applicable third-party credentials/billing.
+**Live P1–P3:** Set `OPENAI_API_KEY` and `AI_MODEL` (OpenAI-compatible JSON-mode Chat Completions; optional `LLM_BASE_URL`). Set `AZURE_SPEECH_REGION` and `AZURE_SPEECH_KEY` to enable browser voice; otherwise select text-only fallback. Open `/live`, upload CV PDF/DOCX/TXT/MD or paste text, generate/revise/approve a plan and start. PDF is extracted locally in browser via pinned PDF.js; DOCX is parsed server-side in memory. Scanned PDFs require OCR externally. The model receives extracted CV text and JD; Azure receives voice audio when enabled. No raw audio is stored here. P4 evaluation and audit ZIP are still pending.
 
 ## Privacy and security
 
-Your self-hosted operator manages database backups and retention. P0 does not implement automated retention, a deletion UI or a `RETENTION_DAYS` setting. Better Auth enforces local account login, and demo API endpoints verify server-side ownership. Transcript consent starts **unchecked**. Raw audio is off. Demo service does not receive CV binary and does not upload audio to Azure. Run public deployments behind TLS and set a unique strong secret; avoid sharing `.env`, databases, transcripts or CVs.
+Your self-hosted operator manages database backups and retention. There is no automated retention or `RETENTION_DAYS` setting. The live UI includes an explicit account-owned interview-data deletion action that cascades over scenarios, CV text, sessions, turns and event evidence. Better Auth enforces local account login, and demo API endpoints verify server-side ownership. Transcript consent starts **unchecked**. Raw audio is off. Demo service does not receive CV binary and does not upload audio to Azure. Run public deployments behind TLS and set a unique strong secret; avoid sharing `.env`, databases, transcripts or CVs.
 
 ## Open source / contributing
 
