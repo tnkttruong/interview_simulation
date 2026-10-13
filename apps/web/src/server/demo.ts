@@ -26,7 +26,7 @@ const answerInput = z.object({
 });
 type UserId = string;
 
-function addEvent(tx: typeof db, sessionId: string, type: string, metadata: Record<string, unknown> = {}) {
+function addEvent(tx: Pick<typeof db, "select" | "insert">, sessionId: string, type: string, metadata: Record<string, unknown> = {}) {
   const previous = tx.select({ seq: workflowEvents.seq }).from(workflowEvents)
     .where(eq(workflowEvents.sessionId, sessionId)).orderBy(desc(workflowEvents.seq)).limit(1).get();
   tx.insert(workflowEvents).values({

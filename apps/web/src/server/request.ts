@@ -12,6 +12,8 @@ export function unauthorized() { return errorResponse("Authentication required",
 export function safeError(error: unknown) {
   if (error instanceof Error) {
     if (error.message.startsWith("Invalid session transition")) return errorResponse(error.message, 409);
+    if (error.message.includes("conflict") || error.message.includes("Conflict")) return errorResponse("Version or idempotency conflict",409);
+    if (error.message.includes("not found")) return errorResponse("Resource not found",404);
     if (error.message.includes("UNIQUE constraint")) return errorResponse("Conflicting request", 409);
     if (error.message.includes("FOREIGN KEY constraint")) return errorResponse("Invalid reference", 400);
     if (error.name === "ZodError") return errorResponse("Invalid or missing fields", 400);

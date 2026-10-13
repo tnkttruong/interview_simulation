@@ -60,7 +60,7 @@ export default function Workspace({userEmail}:{userEmail:string}) {
   async function create(){
     await run(async()=>{
       const created=await api<Scenario>("/api/demo/scenarios",{method:"POST",body:JSON.stringify({role,jobDescription:jd,focus})});
-      setScenario(await api<Scenario>(`/api/demo/scenarios/${created.id}`));
+      setScenario(await api<Scenario>(`/api/demo/scenarios/${created.id}`));requestKeyRef.current=null;
       setNotice("Deterministic demo scenario created; no LLM called.");setScreen("scenario");await refresh();
     });
   }
@@ -94,7 +94,7 @@ export default function Workspace({userEmail}:{userEmail:string}) {
         scenarioId:scenario.id,revision:scenario.latestRevision,requestKey:requestKeyRef.current,
         speech:{interviewerLocale,interviewerVoiceId:voice,candidateSttLocale:candidateLocale,consentToTranscript:consent}
       })});
-      setSession(created);setScreen("meeting");setNotice("Demo interview started. No audio is captured.");
+      setSession(created);requestKeyRef.current=null;setScreen("meeting");setNotice("Demo interview started. No audio is captured.");
       await refresh();
     });
   }
@@ -199,7 +199,7 @@ export default function Workspace({userEmail}:{userEmail:string}) {
             <p className="soft-notice">AI speaks {interviewerLocale} using {voice}; you answer in {candidateLocale}. No silent translation.</p>
             <label className="check"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/>
               I explicitly consent to save this practice transcript and workflow evidence on this self-hosted server.</label>
-            <p className="muted small">No raw audio is recorded. Your practice data remains in SQLite until you remove it using future data controls or the server operator's retention process.</p>
+            <p className="muted small">No raw audio is recorded. Your practice data remains in SQLite until you remove it using future data controls or the server operator retention process.</p>
             <button className="btn primary" disabled={!approved||!consent||busy} onClick={start}>Start meeting →</button>
             {!approved&&<p className="error" role="status">Approve the latest scenario version before starting.</p>}
           </div><div className="panel"><h2>Device check</h2>
