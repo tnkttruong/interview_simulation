@@ -136,6 +136,7 @@ export default function Workspace({userEmail}:{userEmail:string}) {
   }
   const approved=!!scenario?.revisions.find(r=>r.revision===scenario.latestRevision)?.approvedAt;
   const active=screen==="meeting"&&session?.state==="IN_PROGRESS";
+  const canAnswer=active&&typeof session?.nextQuestion==="string";
   return <div className="shell" data-testid="workspace-shell" data-hydrated={hydrated?"true":"false"}>
     <aside className="sidebar">
       <div className="brand">◉ <strong>Interview<br/>Simulation</strong></div>
@@ -197,7 +198,7 @@ export default function Workspace({userEmail}:{userEmail:string}) {
             <button className="btn secondary" onClick={()=>setNotice("Demo preview only: no Azure voice is played.")}>▶ Preview voice (mock)</button>
             <label>Your microphone input language<select value={candidateLocale} onChange={e=>setCandidateLocale(e.target.value as Locale)}>
               <option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="vi-VN">Tiếng Việt</option></select></label>
-            <p className="soft-notice">AI speaks {interviewerLocale} using {voice}; you answer in {candidateLocale}. No silent translation.</p>
+            <p className="soft-notice">P0 shows scripted interviewer questions in {interviewerLocale} (text only, no audio). Future voice: {voice}. Candidate input locale: {candidateLocale}. No silent translation.</p>
             <label className="check"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/>
               I explicitly consent to save this practice transcript and workflow evidence on this self-hosted server.</label>
             <p className="muted small">No raw audio is recorded. Your practice data remains in SQLite until you remove it using future data controls or the server operator retention process.</p>
@@ -219,9 +220,10 @@ export default function Workspace({userEmail}:{userEmail:string}) {
               <button className="btn secondary" disabled={!active||busy} onClick={()=>setHint(v=>!v)}>💡 {hint?"Hide":"Show"} hint (demo)</button>
               <button className="btn danger" disabled={!active||busy} onClick={()=>sessionAction("finish")}>End interview</button></div>
             {hint&&<div className="panel hint"><strong>Practice prompt (not model-generated)</strong><p>Use a concise example: situation, your action, trade-offs and outcome. Do not invent experience. This demo hint is not persisted or scored.</p></div>}
+            {active&&!canAnswer&&<p className="soft-notice" role="status">You have reached the 15-answer demo limit. End this interview to review your history.</p>}
             <div className="panel form-grid"><label>Type answer (STT fallback / offline demo)<textarea rows={4} value={answer} maxLength={12000}
-              onChange={e=>{setAnswer(e.target.value);answerKeyRef.current=null;}} disabled={!active}/></label>
-              <button className="btn primary" disabled={!active||!answer.trim()||busy} onClick={submitAnswer}>✓ Finish answer</button></div>
+              onChange={e=>{if(!busy){setAnswer(e.target.value);answerKeyRef.current=null;}}} disabled={!canAnswer||busy}/></label>
+              <button className="btn primary" disabled={!canAnswer||!answer.trim()||busy} onClick={submitAnswer}>✓ Finish answer</button></div>
           </div><div className="panel transcript"><h2>Transcript</h2><p className="muted small">Original typed answers are persisted; no microphone capture occurs in P0.</p>
             {(session.turns??[]).map(t=><div className="turn" key={t.id}><strong>Q{t.sequence} · Interviewer</strong><p>{t.question}</p>
               <strong>You · {t.answerSource}</strong><p>{t.answer}</p></div>)}
