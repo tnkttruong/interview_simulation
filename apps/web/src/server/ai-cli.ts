@@ -15,7 +15,7 @@ export const cliEnabled=()=>process.env.ENABLE_LOCAL_AI_CLI==="true";
 // Do not pass application secrets (database/auth/Azure/API key) to CLI child processes.
 function restrictedEnv():NodeJS.ProcessEnv {
  const keys=["PATH","HOME","USER","TMPDIR","LANG","LC_ALL","XDG_CONFIG_HOME","XDG_CACHE_HOME","CODEX_HOME","SystemRoot","APPDATA","LOCALAPPDATA"];
- const env:NodeJS.ProcessEnv={};
+ const env:NodeJS.ProcessEnv={NODE_ENV:process.env.NODE_ENV};
  for(const key of keys)if(process.env[key])env[key]=process.env[key];
  return env;
 }
