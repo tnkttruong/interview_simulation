@@ -12,4 +12,10 @@ export const auth = betterAuth({
   baseURL: config.appURL,
   trustedOrigins: [config.appURL],
   emailAndPassword: { enabled: true, minPasswordLength: 10 },
+  rateLimit: { enabled: true, window: 60, max: 120,
+    customRules: {
+      "/sign-in/email": { window: 60, max: 10 },
+      "/sign-up/email": { window: 60, max: 5 }
+    }
+  },
 });
