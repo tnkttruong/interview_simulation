@@ -12,7 +12,7 @@
     "start": "pnpm --filter @interview/web start",
     "lint": "pnpm --filter @interview/web lint",
     "typecheck": "pnpm --filter @interview/web typecheck",
-    "test": "pnpm --filter @interview/core test",
+    "test": "pnpm --filter @interview/core test && pnpm --filter @interview/web test",
     "test:e2e": "pnpm --filter @interview/web test:e2e",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "db:generate": "pnpm --filter @interview/web db:generate",
