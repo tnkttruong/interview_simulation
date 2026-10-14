@@ -45,7 +45,7 @@ export default function LiveWorkspace({email}:{email:string}){
   fetch("/api/live/speech/voices").then(x=>x.json()).then((d:Catalog)=>{
    if(d.voices)setCatalog(d);
   }).catch(()=>{});
-  fetch("/api/demo/sessions?limit=50").then(x=>x.json()).then(d=>{
+  fetch("/api/demo/sessions?limit=50&mode=live").then(x=>x.json()).then(d=>{
    if(d.items)setHistory(d.items.filter((s:{mode?:string})=>s.mode==="live"));
   }).catch(()=>{});
  },[]);

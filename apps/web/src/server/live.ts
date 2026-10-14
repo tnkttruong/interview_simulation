@@ -8,7 +8,7 @@ import { interviewSessions,interviewTurns,liveHints,liveQuestions,scenarioPlans,
 import { changeScenario,createScenario,createSession,getScenario,getSession } from "./demo";
 import {hintSchema,nextInterviewQuestion,planScenario,planSchema,proposeHint,promptVersion,revisePlan} from "./ai";
 import {assertReady} from "./ai-settings";
-import {exclusive,singleFlight} from "./guards";
+import {withAiBudget} from "./ai-budget";
 
 const created=z.object({role:z.string().trim().min(3).max(180),jobDescription:z.string().trim().min(10).max(20000),
   focus:z.string().trim().max(1500).default(""),cvText:z.string().trim().min(15).max(30000),
@@ -29,9 +29,9 @@ function event(tx:typeof db,sessionId:string,type:string,metadata:Record<string,
  .where(eq(workflowEvents.sessionId,sessionId)).orderBy(desc(workflowEvents.seq)).limit(1).get();
  tx.insert(workflowEvents).values({id:randomUUID(),sessionId,seq:(last?.seq??0)+1,type,metadata:JSON.stringify(metadata),timestamp:Date.now()}).run();
 }
-export function createLiveScenario(ownerId:string,payload:unknown){return exclusive("scenario:"+ownerId,()=>createLiveScenarioOnce(ownerId,payload));}
-async function createLiveScenarioOnce(ownerId:string,payload:unknown){
+export async function createLiveScenario(ownerId:string,payload:unknown){
  const input=created.parse(payload);
+return withAiBudget(ownerId,{"action":"create","payload":input},async()=>{
  // Check before invoking billable AI; createScenario rechecks inside its transaction.
  const total=db.select({n:count()}).from(scenarios).where(eq(scenarios.ownerId,ownerId)).get()!.n;
  const recent=db.select({n:count()}).from(scenarios).where(and(eq(scenarios.ownerId,ownerId),
@@ -41,21 +41,23 @@ async function createLiveScenarioOnce(ownerId:string,payload:unknown){
  const scenario=createScenario(ownerId,{role:input.role,jobDescription:input.jobDescription,focus:input.focus},{
    cvText:input.cvText,cvFilename:input.cvFilename,planJson:JSON.stringify(generated.output),modelId:generated.modelId
  });
- return getScenario(ownerId,scenario.id);
+ return getScenario(ownerId,scenario.id); });
+
 }
-export function reviseLiveScenario(ownerId:string,id:string,payload:unknown){return exclusive("revise:"+ownerId+":"+id,()=>reviseLiveScenarioOnce(ownerId,id,payload));}
-async function reviseLiveScenarioOnce(ownerId:string,id:string,payload:unknown){
+export async function reviseLiveScenario(ownerId:string,id:string,payload:unknown){
  const input=instruction.parse(payload);
  const scenario=getScenario(ownerId,id);
  if(scenario.latestRevision!==input.expectedRevision)throw new DomainError("conflict","Scenario revision conflict");
  if(scenario.latestRevision>=20)throw new DomainError("limit","Scenario revision limit reached");
+return withAiBudget(ownerId,{"action":"revise","scenarioId":id,"revision":input.expectedRevision,"feedback":input.feedback},async()=>{
  const previous=planFor(id,scenario.latestRevision);
  const generated=await revisePlan(ownerId,previous.plan,input.feedback,scenario.jobDescription,previous.row.cvText);
  // CAS is rechecked by changeScenario after the slow LLM call.
  changeScenario(ownerId,id,{action:"revise",notes:input.feedback,expectedRevision:input.expectedRevision},{
    cvText:previous.row.cvText,cvFilename:previous.row.cvFilename,planJson:JSON.stringify(generated.output),modelId:generated.modelId
  });
- return getScenario(ownerId,id);
+ return getScenario(ownerId,id); });
+
 }
 export function currentPlan(ownerId:string,id:string){
  const scenario=getScenario(ownerId,id);
@@ -71,8 +73,7 @@ export function startLive(ownerId:string,input:unknown) {
  validateSpeechConfig(data.speech);
  return createSession(ownerId,data,"live");
 }
-export function prepareLiveQuestion(ownerId:string,id:string){return singleFlight("q:"+id,()=>prepareQuestionOnce(ownerId,id));}
-async function prepareQuestionOnce(ownerId:string,id:string){
+export async function prepareLiveQuestion(ownerId:string,id:string){
  const session=owned(id,ownerId);
  if(session.state!=="IN_PROGRESS")throw new DomainError("transition","Interview not in progress");
  const snapshot=getSession(ownerId,id);
@@ -80,6 +81,7 @@ async function prepareQuestionOnce(ownerId:string,id:string){
  if(sequence>maxDemoTurns)throw new DomainError("limit","Maximum live turns reached");
  const existing=db.select().from(liveQuestions).where(and(eq(liveQuestions.sessionId,id),eq(liveQuestions.sequence,sequence))).get();
  if(existing)return getSession(ownerId,id);
+return withAiBudget(ownerId,{"action":"question","sessionId":id,"sequence":sequence},async()=>{
  const {plan}=planFor(session.scenarioId,session.scenarioRevision);
  const speech=validateSpeechConfig(JSON.parse(session.speechConfig));
  const generated=await nextInterviewQuestion(ownerId,plan,snapshot.turns,speech.interviewerLocale);
@@ -96,10 +98,10 @@ async function prepareQuestionOnce(ownerId:string,id:string){
     modelId:generated.modelId,promptVersion,createdAt:Date.now()}).run();
   event(tx as unknown as typeof db,id,"question.prepared",{sequence,modelId:generated.modelId,promptVersion});
  });
- return getSession(ownerId,id);
+ return getSession(ownerId,id); });
+
 }
-export function exposeHint(ownerId:string,id:string){return singleFlight("h:"+id,()=>exposeHintOnce(ownerId,id));}
-async function exposeHintOnce(ownerId:string,id:string){
+export async function exposeHint(ownerId:string,id:string){
  const session=owned(id,ownerId);
  if(session.state!=="IN_PROGRESS")throw new DomainError("transition","Interview not in progress");
  const snapshot=getSession(ownerId,id);
@@ -108,6 +110,7 @@ async function exposeHintOnce(ownerId:string,id:string){
  if(!question)throw new DomainError("invalid","Prepare interviewer question first");
  const existing=db.select().from(liveHints).where(and(eq(liveHints.sessionId,id),eq(liveHints.sequence,sequence))).get();
  if(existing)return {hint:existing.hint,modelId:existing.modelId,sequence};
+return withAiBudget(ownerId,{"action":"hint","sessionId":id,"sequence":sequence},async()=>{
  const {plan}=planFor(session.scenarioId,session.scenarioRevision);
  const generated=await proposeHint(ownerId,plan,question.question,snapshot.turns);
  db.transaction(tx=>{
@@ -123,5 +126,6 @@ async function exposeHintOnce(ownerId:string,id:string){
   }
  });
  const persisted=db.select().from(liveHints).where(and(eq(liveHints.sessionId,id),eq(liveHints.sequence,sequence))).get()!;
- return {hint:hintSchema.parse({hint:persisted.hint}).hint,modelId:persisted.modelId,sequence};
+ return {hint:hintSchema.parse({hint:persisted.hint}).hint,modelId:persisted.modelId,sequence}; });
+
 }

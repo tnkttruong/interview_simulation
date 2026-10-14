@@ -1,7 +1,7 @@
 "use client";
 // Client-only PDF text extraction; no raw PDF leaves the browser.
 // PDF.js v3 classic distribution exposes pdfjsLib as window global.
-// Self-hosted pdfjs-dist 3.11.174 under public/vendor/pdfjs (see README there).
+// Self-hosted pdfjs-dist 3.11.174 under public/vendor/pdfjs (see README there): no third-party CDN at runtime.
 const base="/vendor/pdfjs/";
 let loading:Promise<void>|undefined;
 function ensurePdfJs(){
@@ -9,9 +9,9 @@ function ensurePdfJs(){
  loading=new Promise<void>((resolve,reject)=>{
   const script=document.createElement("script");
   script.src=base+"pdf.min.js";
-  script.onload=()=>resolve();script.onerror=()=>{loading=undefined;reject(new Error("PDF.js failed to load"));};
+  script.onload=()=>resolve();script.onerror=()=>reject(new Error("PDF.js failed to load"));
   document.head.append(script);
- });
+ }).catch(error=>{loading=undefined;throw error;});
  return loading;
 }
 export async function extractPdf(file:File):Promise<string>{

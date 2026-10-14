@@ -100,6 +100,11 @@ export function changeScenario(ownerId: UserId, id: string, payload: unknown, pl
     if (!scenario) throw new DomainError("not_found", "Scenario not found");
     if (scenario.latestRevision !== input.expectedRevision) throw new DomainError("conflict", "Scenario revision conflict");
     if (input.action === "revise") {
+      // Reject demo-only revisions on scenarios carrying immutable AI plan snapshots.
+      // A missing plan would otherwise make the new live revision unusable.
+      const isLivePlan=tx.select({revision:scenarioPlans.revision}).from(scenarioPlans)
+        .where(eq(scenarioPlans.scenarioId,id)).limit(1).get();
+      if(isLivePlan && !planned)throw new DomainError("invalid","Live scenarios require AI-assisted revisions");
       if (scenario.latestRevision >= MAX_SCENARIO_REVISIONS) throw new DomainError("limit", "Scenario revision limit reached");
       const revision = scenario.latestRevision + 1;
       tx.insert(scenarioRevisions).values({ scenarioId:id, revision, notes:input.notes, approvedAt:null }).run();
@@ -113,13 +118,15 @@ export function changeScenario(ownerId: UserId, id: string, payload: unknown, pl
     return getScenario(ownerId,id);
   });
 }
-export function listSessions(ownerId: UserId, limit: number, offset: number) {
+export function listSessions(ownerId: UserId, limit: number, offset: number, mode?: "live" | "demo") {
+  const filter=mode?and(eq(interviewSessions.ownerId,ownerId),eq(interviewSessions.mode,mode)):eq(interviewSessions.ownerId,ownerId);
   const total = db.select({value:count()}).from(interviewSessions)
-    .where(eq(interviewSessions.ownerId,ownerId)).get()!.value;
+    .where(filter).get()!.value;
   const items = db.select({ id: interviewSessions.id, state: interviewSessions.state, version: interviewSessions.version,
     scenarioId: interviewSessions.scenarioId, scenarioRevision: interviewSessions.scenarioRevision,
+    mode: interviewSessions.mode,
     createdAt: interviewSessions.createdAt, speechConfig: interviewSessions.speechConfig })
-    .from(interviewSessions).where(eq(interviewSessions.ownerId,ownerId))
+    .from(interviewSessions).where(filter)
     .orderBy(desc(interviewSessions.createdAt),desc(interviewSessions.id)).limit(limit).offset(offset).all();
   return {items,total,nextOffset:offset+items.length<total?offset+items.length:null};
 }

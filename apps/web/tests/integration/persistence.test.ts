@@ -48,7 +48,7 @@ it("reruns migrations after restart without losing persisted interview data", ()
     migrate();
     const reopened = new Database(path);
     try {
-      expect((reopened.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as {count:number}).count).toBe(3);
+      expect((reopened.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as {count:number}).count).toBe(4);
       expect((reopened.prepare("SELECT COUNT(*) AS count FROM interview_turns").get() as {count:number}).count).toBe(1);
       expect((reopened.prepare("SELECT COUNT(*) AS count FROM workflow_events").get() as {count:number}).count).toBe(1);
       expect((reopened.prepare("SELECT COUNT(*) AS count FROM live_questions").get() as {count:number}).count).toBe(0);
