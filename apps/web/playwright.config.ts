@@ -16,7 +16,7 @@ export default defineConfig({
       url: "http://localhost:3000/signin",
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
-      env: { DEMO_MODE: "true",OPENAI_API_KEY:"ci-mock-key",AI_MODEL:"ci-mock-model",LLM_BASE_URL:"http://localhost:8787/v1" }
+      env: { DEMO_MODE: "true",ENABLE_PROVIDER_TESTS:"true",OPENAI_API_KEY:"ci-mock-key",AI_MODEL:"ci-mock-model",LLM_BASE_URL:"http://localhost:8787/v1" }
     }
   ],
 });
