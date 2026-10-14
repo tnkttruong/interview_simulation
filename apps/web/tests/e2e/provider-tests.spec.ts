@@ -15,6 +15,8 @@ test("test dashboard exposes readiness but does not leak credentials or run abse
   await page.getByLabel("Email").fill("provider-test-" + Date.now() + "@example.test");
   await page.getByLabel("Password").fill("correct-horse-battery-staple!");
   await page.getByRole("button", { name: "Create account" }).click();
+  // Wait for Better Auth navigation; do not abort the in-flight redirect with page.goto.
+  await expect(page.getByRole("link", { name: /AI Interview/ })).toBeVisible();
   await page.goto("/settings");
   await page.getByRole("link", { name: /Test providers/ }).click();
   await expect(page.getByRole("heading", { name: "Test AI and Azure providers" })).toBeVisible();
