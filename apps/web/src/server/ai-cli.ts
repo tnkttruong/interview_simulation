@@ -1,5 +1,5 @@
 import "server-only";
-import {spawn, spawnSync} from "node:child_process";
+import {execFile, spawn, spawnSync} from "node:child_process";
 import {mkdtemp, rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
@@ -19,36 +19,77 @@ function restrictedEnv():NodeJS.ProcessEnv {
  for(const key of keys)if(process.env[key])env[key]=process.env[key];
  return env;
 }
+function execAsync(cmd:string,args:string[],timeout:number,maxBuffer:number){
+ return new Promise<{ok:boolean,stdout:string}>(resolve=>execFile(cmd,args,
+  {encoding:"utf8",timeout,maxBuffer,env:restrictedEnv(),windowsHide:true},
+  (error,stdout)=>resolve({ok:!error,stdout:String(stdout||"")})));
+}
+// Only the very first probe blocks; later refreshes are async (stale-while-revalidate)
+// so request handlers never stall on a synchronous child process after warm-up.
 const checked=new Map<CliProvider,{time:number,ready:boolean}>();
+const refreshing=new Set<string>();
 export function cliAvailable(provider:CliProvider):boolean {
  if(!cliEnabled())return false;
  const cached=checked.get(provider);
- if(cached&&Date.now()-cached.time<30000)return cached.ready;
+ if(cached){
+  if(Date.now()-cached.time>=30000&&!refreshing.has(provider)){
+   refreshing.add(provider);
+   void execAsync(commandFor[provider],["--version"],2500,65536)
+    .then(r=>{checked.set(provider,{time:Date.now(),ready:r.ok});})
+    .finally(()=>{refreshing.delete(provider);});
+  }
+  return cached.ready;
+ }
  const check=spawnSync(commandFor[provider],["--version"],{encoding:"utf8",timeout:2500,maxBuffer:65536,env:restrictedEnv(),windowsHide:true});
  const ready=check.status===0;
  checked.set(provider,{time:Date.now(),ready});
  return ready;
 }
 let agyCache:{time:number,models:string[]}|null=null;
+function jsonModels(stdout:string):string[] {
+ try{
+  const body=JSON.parse(stdout) as {command?:{data?:{models?:{id?:string}[]}}};
+  return (body.command?.data?.models||[]).map(x=>x.id||"");
+ }catch{return [];}
+}
+function textModels(stdout:string):string[] {
+ return stdout.split(/\r?\n/).map(line=>line.trim().split(/\s+/)[0]||"");
+}
+function mergeModels(discovered:string[]):string[] {
+ return [...new Set([...discovered.filter(x=>validModel.test(x)),...agyFallbackModels])].slice(0,100);
+}
+async function refreshAgyModels(){
+ // Newer Agy exposes machine-readable models; older versions only offer plain text.
+ const json=await execAsync("agy",["--output-format","json","models"],4000,524288);
+ let discovered=json.ok?jsonModels(json.stdout):[];
+ if(!discovered.length){
+  const text=await execAsync("agy",["models"],4000,524288);
+  if(text.ok)discovered=textModels(text.stdout);
+ }
+ agyCache={time:Date.now(),models:mergeModels(discovered)};
+}
 export function cliModels(provider:CliProvider):string[] {
  if(provider==="codex_cli")return codexModels;
  if(!cliAvailable("agy_cli"))return agyFallbackModels;
- if(agyCache&&Date.now()-agyCache.time<60000)return agyCache.models;
- // Newer Agy exposes machine-readable models; older versions only offer plain text.
- const json=spawnSync("agy",["--output-format","json","models"],{encoding:"utf8",timeout:4000,maxBuffer:524288,env:restrictedEnv(),windowsHide:true});
- let discovered:string[]=[];
- if(json.status===0) {
-  try{
-   const body=JSON.parse(json.stdout) as {command?:{data?:{models?:{id?:string}[]}}};
-   discovered=(body.command?.data?.models||[]).map(x=>x.id||"");
-  }catch{/* use text fallback */}
+ if(agyCache){
+  if(Date.now()-agyCache.time>=60000&&!refreshing.has("agy_models")){
+   refreshing.add("agy_models");
+   void refreshAgyModels().finally(()=>{refreshing.delete("agy_models");});
+  }
+  return agyCache.models;
  }
+ const json=spawnSync("agy",["--output-format","json","models"],{encoding:"utf8",timeout:4000,maxBuffer:524288,env:restrictedEnv(),windowsHide:true});
+ let discovered=json.status===0?jsonModels(json.stdout):[];
  if(!discovered.length){
   const text=spawnSync("agy",["models"],{encoding:"utf8",timeout:4000,maxBuffer:524288,env:restrictedEnv(),windowsHide:true});
-  if(text.status===0)discovered=text.stdout.split(/\r?\n/).map(line=>line.trim().split(/\s+/)[0]||"");
+  if(text.status===0)discovered=textModels(text.stdout);
  }
- agyCache={time:Date.now(),models:[...new Set([...discovered.filter(x=>validModel.test(x)),...agyFallbackModels])].slice(0,100)};
+ agyCache={time:Date.now(),models:mergeModels(discovered)};
  return agyCache.models;
+}
+const authPattern=/(not (logged|signed) in|log ?in|sign ?in|unauthori[sz]ed|unauthenticated|authenticat|credential|api key|\b401\b|\b403\b)/i;
+function redact(text:string){
+ return text.replace(/(sk-[A-Za-z0-9_-]{8,}|Bearer\s+[A-Za-z0-9._~+/=-]+|[A-Za-z0-9_-]{32,})/g,"[redacted]");
 }
 function parseResponse(provider:CliProvider,stdout:string):string {
  if(provider==="codex_cli"){
@@ -83,15 +124,25 @@ export async function runCli(provider:CliProvider,model:string,prompt:string):Pr
    : ["--input-format","stream-json","--output-format","stream-json","--sandbox","--model",model];
   return await new Promise<string>((resolve,reject)=>{
    const child=spawn(cmd,args,{cwd:dir,env:restrictedEnv(),shell:false,stdio:["pipe","pipe","pipe"],windowsHide:true});
-   let stdout="",stderrBytes=0,finished=false,expired=false;
+   let stdout="",stderrBytes=0,stderrHead="",finished=false,expired=false;
    const limit=2*1024*1024;
    const timer=setTimeout(()=>{expired=true;child.kill("SIGKILL");},90000);
    child.stdout.on("data",(buffer:Buffer)=>{stdout+=buffer.toString("utf8");if(Buffer.byteLength(stdout)>limit)child.kill("SIGKILL");});
-   child.stderr.on("data",(buffer:Buffer)=>{stderrBytes+=buffer.length;if(stderrBytes>limit)child.kill("SIGKILL");});
+   child.stderr.on("data",(buffer:Buffer)=>{
+    stderrBytes+=buffer.length;
+    if(stderrHead.length<4096)stderrHead+=buffer.toString("utf8").slice(0,4096-stderrHead.length);
+    if(stderrBytes>limit)child.kill("SIGKILL");
+   });
    child.on("error",()=>{if(!finished){finished=true;clearTimeout(timer);reject(new DomainError("invalid","Unable to launch AI CLI"));}});
    child.on("close",code=>{
     if(finished)return;finished=true;clearTimeout(timer);
-    if(expired||code!==0||Buffer.byteLength(stdout)>limit)return reject(new DomainError("invalid","AI CLI invocation failed or timed out"));
+    if(expired||code!==0||Buffer.byteLength(stdout)>limit){
+     // Operators get redacted diagnostics; clients only get a generic (or auth-hint) message.
+     console.warn(JSON.stringify({event:"ai_cli_failed",provider,code,expired,stderr:redact(stderrHead).slice(0,1000)}));
+     if(!expired&&authPattern.test(stderrHead))
+      return reject(new DomainError("invalid","AI CLI appears not signed in on the server; sign in to the CLI and retry"));
+     return reject(new DomainError("invalid","AI CLI invocation failed or timed out"));
+    }
     const answer=parseResponse(provider,stdout);
     if(!answer)return reject(new DomainError("invalid","AI CLI produced no structured reply"));
     resolve(answer);

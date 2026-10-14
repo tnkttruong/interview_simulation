@@ -3,9 +3,10 @@ import {z} from "zod";
 import {voiceByLocale} from "@interview/core";
 import {currentUser,safeError,tracedApi,unauthorized} from "@/server/request";
 import {DomainError} from "@interview/core";
+import {createThrottle} from "@/server/guards";
 export const runtime="nodejs";
 const input=z.object({interviewerLocale:z.enum(["en-US","en-GB","vi-VN"]),voiceId:z.string().max(80)});
-const last=new Map<string,number>();
+const throttle=createThrottle(10000);
 export async function POST(req:Request){
  return tracedApi(req,"speech.preview",async()=>{
   const user=await currentUser(req);if(!user)return unauthorized();
@@ -16,9 +17,7 @@ export async function POST(req:Request){
    const region=process.env.AZURE_SPEECH_REGION,key=process.env.AZURE_SPEECH_KEY;
    if(!region||!key||!/^[a-z0-9-]{2,35}$/.test(region))
     throw new DomainError("invalid","Azure Speech unavailable");
-   const now=Date.now();
-   if(now-(last.get(user.id)??0)<10000)return NextResponse.json({error:"Please retry the preview later"},{status:429});
-   last.set(user.id,now);
+   if(!throttle.tryAcquire(user.id))return NextResponse.json({error:"Please retry the preview later"},{status:429});
    const phrase=parsed.interviewerLocale==="vi-VN"?"Xin chào, chào mừng bạn đến buổi phỏng vấn."
      :"Hello, welcome to your interview practice.";
    const ssml='<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="'+parsed.interviewerLocale+'"><voice name="'+parsed.voiceId+'">'+phrase+'</voice></speak>';

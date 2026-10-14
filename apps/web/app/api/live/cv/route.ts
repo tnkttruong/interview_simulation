@@ -7,6 +7,8 @@ export async function POST(req:Request){
  return tracedApi(req,"cv.extract",async()=>{
   const user=await currentUser(req);if(!user)return unauthorized();
   try{
+   // Reject oversized bodies before buffering them (multipart overhead allowance).
+   if(Number(req.headers.get("content-length")||0)>5*1024*1024)throw new DomainError("limit","CV must be 1 byte to 4 MB");
    const data=await req.formData();
    const file=data.get("file");
    if(!(file instanceof File))throw new DomainError("invalid","Upload CV file");

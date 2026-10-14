@@ -169,7 +169,7 @@ export function createSession(ownerId: UserId, payload: unknown, mode: "demo" | 
     for (const [action,type] of [["enterPreflight","preflight.entered"],["skipDemoPreflight",mode==="live"?"preflight.client_reported":"preflight.demo_skipped"],["start","interview.started"]] as const) {
       state = transition(state,action);
       version += 1;
-      addEvent(tx,record.id,type,{mode:"demo"});
+      addEvent(tx,record.id,type,{mode});
     }
     tx.update(interviewSessions).set({state,version}).where(eq(interviewSessions.id,record.id)).run();
     return getSession(ownerId,record.id);

@@ -8,6 +8,7 @@ import { interviewSessions,interviewTurns,liveHints,liveQuestions,scenarioPlans,
 import { changeScenario,createScenario,createSession,getScenario,getSession } from "./demo";
 import {hintSchema,nextInterviewQuestion,planScenario,planSchema,proposeHint,promptVersion,revisePlan} from "./ai";
 import {assertReady} from "./ai-settings";
+import {exclusive,singleFlight} from "./guards";
 
 const created=z.object({role:z.string().trim().min(3).max(180),jobDescription:z.string().trim().min(10).max(20000),
   focus:z.string().trim().max(1500).default(""),cvText:z.string().trim().min(15).max(30000),
@@ -28,7 +29,8 @@ function event(tx:typeof db,sessionId:string,type:string,metadata:Record<string,
  .where(eq(workflowEvents.sessionId,sessionId)).orderBy(desc(workflowEvents.seq)).limit(1).get();
  tx.insert(workflowEvents).values({id:randomUUID(),sessionId,seq:(last?.seq??0)+1,type,metadata:JSON.stringify(metadata),timestamp:Date.now()}).run();
 }
-export async function createLiveScenario(ownerId:string,payload:unknown){
+export function createLiveScenario(ownerId:string,payload:unknown){return exclusive("scenario:"+ownerId,()=>createLiveScenarioOnce(ownerId,payload));}
+async function createLiveScenarioOnce(ownerId:string,payload:unknown){
  const input=created.parse(payload);
  // Check before invoking billable AI; createScenario rechecks inside its transaction.
  const total=db.select({n:count()}).from(scenarios).where(eq(scenarios.ownerId,ownerId)).get()!.n;
@@ -41,7 +43,8 @@ export async function createLiveScenario(ownerId:string,payload:unknown){
  });
  return getScenario(ownerId,scenario.id);
 }
-export async function reviseLiveScenario(ownerId:string,id:string,payload:unknown){
+export function reviseLiveScenario(ownerId:string,id:string,payload:unknown){return exclusive("revise:"+ownerId+":"+id,()=>reviseLiveScenarioOnce(ownerId,id,payload));}
+async function reviseLiveScenarioOnce(ownerId:string,id:string,payload:unknown){
  const input=instruction.parse(payload);
  const scenario=getScenario(ownerId,id);
  if(scenario.latestRevision!==input.expectedRevision)throw new DomainError("conflict","Scenario revision conflict");
@@ -68,7 +71,8 @@ export function startLive(ownerId:string,input:unknown) {
  validateSpeechConfig(data.speech);
  return createSession(ownerId,data,"live");
 }
-export async function prepareLiveQuestion(ownerId:string,id:string){
+export function prepareLiveQuestion(ownerId:string,id:string){return singleFlight("q:"+id,()=>prepareQuestionOnce(ownerId,id));}
+async function prepareQuestionOnce(ownerId:string,id:string){
  const session=owned(id,ownerId);
  if(session.state!=="IN_PROGRESS")throw new DomainError("transition","Interview not in progress");
  const snapshot=getSession(ownerId,id);
@@ -94,7 +98,8 @@ export async function prepareLiveQuestion(ownerId:string,id:string){
  });
  return getSession(ownerId,id);
 }
-export async function exposeHint(ownerId:string,id:string){
+export function exposeHint(ownerId:string,id:string){return singleFlight("h:"+id,()=>exposeHintOnce(ownerId,id));}
+async function exposeHintOnce(ownerId:string,id:string){
  const session=owned(id,ownerId);
  if(session.state!=="IN_PROGRESS")throw new DomainError("transition","Interview not in progress");
  const snapshot=getSession(ownerId,id);

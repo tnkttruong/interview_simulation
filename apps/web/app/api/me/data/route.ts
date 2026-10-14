@@ -7,8 +7,7 @@ export async function DELETE(req:Request){
  return tracedApi(req,"data.delete",async()=>{
   const user=await currentUser(req);if(!user)return unauthorized();
   try{
-   const input=z.object({confirm:z.literal("DELETE ALL MY INTERVIEW DATA")}).parse(await req.json());
-   if(!input)throw new Error("Invalid confirmation");
+   z.object({confirm:z.literal("DELETE ALL MY INTERVIEW DATA")}).parse(await req.json());
    return NextResponse.json(deleteInterviewData(user.id),{headers:{"Cache-Control":"no-store"}});
   }catch(error){return safeError(error);}
  });

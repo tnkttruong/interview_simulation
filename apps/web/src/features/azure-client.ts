@@ -1,8 +1,8 @@
 "use client";
-// Version pinned: official Azure browser SDK CDN distribution. Never load subscription key in browser.
+// Version pinned (1.52.0) and self-hosted under public/vendor/azure-speech (see README there). Never load subscription key in browser.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SDK=any;
-const url="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.52.0/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle-min.js";
+const url="/vendor/azure-speech/microsoft.cognitiveservices.speech.sdk.bundle-min.js";
 let loading:Promise<SDK>|undefined;
 export function loadAzureSdk():Promise<SDK>{
  if(typeof window==="undefined")return Promise.reject(new Error("Browser required"));
@@ -12,9 +12,9 @@ export function loadAzureSdk():Promise<SDK>{
  if(loading)return loading;
  loading=new Promise((resolve,reject)=>{
   const script=document.createElement("script");
-  script.src=url;script.async=true;script.crossOrigin="anonymous";
+  script.src=url;script.async=true;
   script.onload=()=>win.SpeechSDK?resolve(win.SpeechSDK):reject(new Error("Azure SDK missing"));
-  script.onerror=()=>reject(new Error("Azure Speech CDN unavailable"));
+  script.onerror=()=>reject(new Error("Azure Speech SDK failed to load"));
   document.head.append(script);
  }).catch(e=>{loading=undefined;throw e;});
  return loading;

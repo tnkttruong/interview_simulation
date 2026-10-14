@@ -18,6 +18,7 @@ WORKDIR /app
 RUN mkdir -p /data && chown node:node /data
 COPY --from=builder --chown=node:node /source/apps/web/.next/standalone ./
 COPY --from=builder --chown=node:node /source/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder --chown=node:node /source/apps/web/public ./apps/web/public
 COPY --from=builder --chown=node:node /source/apps/web/scripts ./apps/web/scripts
 USER node
 EXPOSE 3000
