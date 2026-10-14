@@ -72,3 +72,8 @@ Codex is invoked with `codex exec --json --sandbox read-only --skip-git-repo-che
 The server-side `OPENAI_API_KEY`, `AI_MODEL` and optional `LLM_BASE_URL` path remains supported. Select **API key** in Settings to use it; account settings can override the default model. Keys are not read or stored by the browser or SQLite. **TODO:** secure per-account API-key management through this settings page; this PR deliberately keeps the existing server environment approach.
 
 CLI auth with real accounts and Azure voice remain external smoke-test requirements.
+
+
+## Test Codex, Agy and Azure without an interview
+
+Sign in and open **/settings/test** from Settings. To enable paid smoke tests on a trusted host set `ENABLE_PROVIDER_TESTS=true` (and `ENABLE_LOCAL_AI_CLI=true` for local CLI) and restart. The page separately checks Codex CLI, Agy CLI, Azure token exchange, real Azure TTS voice preview, browser microphone/speaker and Azure STT. It does not save transcripts or credentials. These checks require real provider authentication and are **not** asserted by CI. **Disable the test flag after finishing** if exposing the server to untrusted accounts. See [provider diagnostics](docs/provider-diagnostics.md).
