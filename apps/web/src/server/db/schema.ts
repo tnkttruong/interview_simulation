@@ -63,6 +63,7 @@ export const interviewSessions = sqliteTable("interview_sessions", {
   scenarioId: text("scenario_id").notNull().references(() => scenarios.id, { onDelete: "cascade" }),
   scenarioRevision: integer("scenario_revision").notNull(),
   requestKey: text("request_key").notNull(),
+  mode: text("mode").notNull().default("demo"),
   speechConfig: text("speech_config").notNull(),
   state: text("state").notNull(),
   version: integer("version").notNull().default(1),
@@ -90,3 +91,51 @@ export const workflowEvents = sqliteTable("workflow_events", {
   metadata: text("metadata").notNull(),
   timestamp: integer("timestamp").notNull(),
 }, (t) => [uniqueIndex("session_event_seq_unique").on(t.sessionId,t.seq)]);
+
+export const scenarioPlans = sqliteTable("scenario_plans",{
+  scenarioId:text("scenario_id").notNull().references(()=>scenarios.id,{onDelete:"cascade"}),
+  revision:integer("revision").notNull(),
+  cvText:text("cv_text").notNull(),
+  cvFilename:text("cv_filename").notNull(),
+  planJson:text("plan_json").notNull(),
+  modelId:text("model_id").notNull(),
+  createdAt:integer("created_at").notNull(),
+}, t=>[primaryKey({columns:[t.scenarioId,t.revision]})]);
+export const liveQuestions = sqliteTable("live_questions",{
+  id:text("id").primaryKey(),
+  sessionId:text("session_id").notNull().references(()=>interviewSessions.id,{onDelete:"cascade"}),
+  sequence:integer("sequence").notNull(),
+  question:text("question").notNull(),
+  competency:text("competency").notNull(),
+  modelId:text("model_id").notNull(),
+  promptVersion:text("prompt_version").notNull(),
+  createdAt:integer("created_at").notNull()
+},t=>[uniqueIndex("live_question_seq").on(t.sessionId,t.sequence)]);
+export const liveHints = sqliteTable("live_hints",{
+  id:text("id").primaryKey(),
+  sessionId:text("session_id").notNull().references(()=>interviewSessions.id,{onDelete:"cascade"}),
+  sequence:integer("sequence").notNull(),
+  hint:text("hint").notNull(),
+  modelId:text("model_id").notNull(),
+  createdAt:integer("created_at").notNull()
+},t=>[uniqueIndex("live_hint_seq").on(t.sessionId,t.sequence)]);
+
+export const aiSettings=sqliteTable("ai_settings",{
+  ownerId:text("owner_id").primaryKey().references(()=>user.id,{onDelete:"cascade"}),
+  provider:text("provider").notNull(),
+  model:text("model").notNull(),
+  interviewerLocale:text("interviewer_locale").notNull(),
+  candidateSttLocale:text("candidate_stt_locale").notNull(),
+  voiceId:text("voice_id").notNull(),
+  updatedAt:integer("updated_at").notNull()
+});
+
+export const aiCallAttempts=sqliteTable("ai_call_attempts",{
+ id:text("id").primaryKey(),
+ ownerId:text("owner_id").notNull().references(()=>user.id,{onDelete:"cascade"}),
+ operationKey:text("operation_key").notNull(),
+ status:text("status").notNull(),
+ startedAt:integer("started_at").notNull(),
+ expiresAt:integer("expires_at").notNull(),
+ finishedAt:integer("finished_at")
+});

@@ -10,7 +10,7 @@ export function getConfig() {
   if (!secret || secret.length < 32 || secret.includes("replace-with")) {
     throw new Error("Set BETTER_AUTH_SECRET to a secure random string with at least 32 characters");
   }
-  if (!demoMode) throw new Error("Live Azure/LLM mode is not implemented in P0. Set DEMO_MODE=true.");
+  if (!demoMode && process.env.ENABLE_LOCAL_AI_CLI !== "true" && !(process.env.OPENAI_API_KEY && process.env.AI_MODEL)) throw new Error("Live mode requires OPENAI_API_KEY and AI_MODEL.");
   return {
     demoMode,
     secret,

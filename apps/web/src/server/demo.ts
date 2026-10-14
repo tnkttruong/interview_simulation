@@ -4,7 +4,7 @@ import { and, count, desc, eq, gte } from "drizzle-orm";
 import { z } from "zod";
 import { DomainError, getDemoQuestion, maxDemoTurns, transition, validateSpeechConfig, type SessionState } from "@interview/core";
 import { db } from "./db/client";
-import { interviewSessions, interviewTurns, scenarioRevisions, scenarios, workflowEvents } from "./db/schema";
+import { interviewSessions, interviewTurns, liveQuestions, scenarioPlans, scenarioRevisions, scenarios, workflowEvents } from "./db/schema";
 
 const now = () => Date.now();
 const scenarioInput = z.object({
@@ -23,8 +23,9 @@ const answerInput = z.object({
   expectedTurnSequence: z.number().int().min(1).max(maxDemoTurns),
   answer: z.string().trim().min(1).max(12000),
   // P0 does not expose a trusted STT provider. Validate provenance with provider evidence in P2.
-  source: z.literal("typed").default("typed"),
-  originalStt: z.never().optional(),
+  source: z.enum(["typed","client_stt","corrected"]).default("typed"),
+  originalStt: z.string().trim().max(12000).optional(),
+  expectedQuestionId: z.string().uuid().optional(),
 });
 type UserId = string;
 const HOUR_MS = 3600000;
@@ -68,7 +69,8 @@ export function listScenarios(ownerId: UserId, limit: number, offset: number) {
     .orderBy(desc(scenarios.createdAt), desc(scenarios.id)).limit(limit).offset(offset).all();
   return { items, total, nextOffset: offset + items.length < total ? offset + items.length : null };
 }
-export function createScenario(ownerId: UserId, payload: unknown) {
+type PlanAttachment={cvText:string;cvFilename:string;planJson:string;modelId:string};
+export function createScenario(ownerId: UserId, payload: unknown, planned?:PlanAttachment) {
   const input = scenarioInput.parse(payload);
   return db.transaction((tx) => {
     const total = tx.select({ value: count() }).from(scenarios).where(eq(scenarios.ownerId, ownerId)).get()!.value;
@@ -78,6 +80,7 @@ export function createScenario(ownerId: UserId, payload: unknown) {
     const scenario = { id: randomUUID(), ownerId, ...input, latestRevision: 1, createdAt: now() };
     tx.insert(scenarios).values(scenario).run();
     tx.insert(scenarioRevisions).values({ scenarioId: scenario.id, revision: 1, notes: "Initial demo scenario", approvedAt: null }).run();
+    if(planned)tx.insert(scenarioPlans).values({scenarioId:scenario.id,revision:1,...planned,createdAt:now()}).run();
     return scenario;
   });
 }
@@ -87,7 +90,7 @@ export function getScenario(ownerId: UserId, id: string) {
     .where(eq(scenarioRevisions.scenarioId, id)).orderBy(desc(scenarioRevisions.revision)).all();
   return { ...scenario, revisions };
 }
-export function changeScenario(ownerId: UserId, id: string, payload: unknown) {
+export function changeScenario(ownerId: UserId, id: string, payload: unknown, planned?:PlanAttachment) {
   const input = z.discriminatedUnion("action", [
     z.object({ action: z.literal("approve"), expectedRevision: z.number().int().positive() }),
     z.object({ action: z.literal("revise"), expectedRevision: z.number().int().positive(), notes: z.string().trim().min(1).max(1000) })
@@ -97,10 +100,16 @@ export function changeScenario(ownerId: UserId, id: string, payload: unknown) {
     if (!scenario) throw new DomainError("not_found", "Scenario not found");
     if (scenario.latestRevision !== input.expectedRevision) throw new DomainError("conflict", "Scenario revision conflict");
     if (input.action === "revise") {
+      // Reject demo-only revisions on scenarios carrying immutable AI plan snapshots.
+      // A missing plan would otherwise make the new live revision unusable.
+      const isLivePlan=tx.select({revision:scenarioPlans.revision}).from(scenarioPlans)
+        .where(eq(scenarioPlans.scenarioId,id)).limit(1).get();
+      if(isLivePlan && !planned)throw new DomainError("invalid","Live scenarios require AI-assisted revisions");
       if (scenario.latestRevision >= MAX_SCENARIO_REVISIONS) throw new DomainError("limit", "Scenario revision limit reached");
       const revision = scenario.latestRevision + 1;
       tx.insert(scenarioRevisions).values({ scenarioId:id, revision, notes:input.notes, approvedAt:null }).run();
       tx.update(scenarios).set({ latestRevision: revision }).where(eq(scenarios.id,id)).run();
+      if(planned)tx.insert(scenarioPlans).values({scenarioId:id,revision,...planned,createdAt:now()}).run();
     } else {
       const current = tx.select().from(scenarioRevisions).where(and(eq(scenarioRevisions.scenarioId,id), eq(scenarioRevisions.revision,scenario.latestRevision))).get();
       if (!current?.approvedAt) tx.update(scenarioRevisions).set({ approvedAt:now() })
@@ -109,13 +118,15 @@ export function changeScenario(ownerId: UserId, id: string, payload: unknown) {
     return getScenario(ownerId,id);
   });
 }
-export function listSessions(ownerId: UserId, limit: number, offset: number) {
+export function listSessions(ownerId: UserId, limit: number, offset: number, mode?: "live" | "demo") {
+  const filter=mode?and(eq(interviewSessions.ownerId,ownerId),eq(interviewSessions.mode,mode)):eq(interviewSessions.ownerId,ownerId);
   const total = db.select({value:count()}).from(interviewSessions)
-    .where(eq(interviewSessions.ownerId,ownerId)).get()!.value;
+    .where(filter).get()!.value;
   const items = db.select({ id: interviewSessions.id, state: interviewSessions.state, version: interviewSessions.version,
     scenarioId: interviewSessions.scenarioId, scenarioRevision: interviewSessions.scenarioRevision,
+    mode: interviewSessions.mode,
     createdAt: interviewSessions.createdAt, speechConfig: interviewSessions.speechConfig })
-    .from(interviewSessions).where(eq(interviewSessions.ownerId,ownerId))
+    .from(interviewSessions).where(filter)
     .orderBy(desc(interviewSessions.createdAt),desc(interviewSessions.id)).limit(limit).offset(offset).all();
   return {items,total,nextOffset:offset+items.length<total?offset+items.length:null};
 }
@@ -125,11 +136,15 @@ export function getSession(ownerId:UserId, id:string) {
     .orderBy(interviewTurns.sequence).all();
   const scenario = requireOwnedScenario(ownerId,session.scenarioId);
   const speech = validateSpeechConfig(JSON.parse(session.speechConfig));
+  const upcoming = session.mode === "live" && session.state === "IN_PROGRESS"
+    ? db.select().from(liveQuestions).where(and(eq(liveQuestions.sessionId,id),eq(liveQuestions.sequence,turns.length+1))).get()
+    : null;
   return { ...session, scenario: { role: scenario.role, focus: scenario.focus }, turns,
+    nextQuestionId: upcoming?.id ?? null,
     nextQuestion: session.state === "IN_PROGRESS" && turns.length < maxDemoTurns
-      ? getDemoQuestion(turns.length, speech.interviewerLocale) : null };
+      ? (session.mode === "live" ? upcoming?.question ?? null : getDemoQuestion(turns.length, speech.interviewerLocale)) : null };
 }
-export function createSession(ownerId: UserId, payload: unknown) {
+export function createSession(ownerId: UserId, payload: unknown, mode: "demo" | "live" = "demo") {
   const input = startInput.parse(payload);
   const speech = validateSpeechConfig(input.speech);
   return db.transaction((tx) => {
@@ -137,7 +152,7 @@ export function createSession(ownerId: UserId, payload: unknown) {
       .where(and(eq(interviewSessions.ownerId,ownerId),eq(interviewSessions.requestKey,input.requestKey))).get();
     if (existing) {
       if (existing.scenarioId !== input.scenarioId || existing.scenarioRevision !== input.revision ||
-          existing.speechConfig !== JSON.stringify(speech)) throw new DomainError("conflict", "Request key conflict");
+          existing.speechConfig !== JSON.stringify(speech) || existing.mode !== mode) throw new DomainError("conflict", "Request key conflict");
       return getSession(ownerId,existing.id);
     }
     const total = tx.select({value:count()}).from(interviewSessions)
@@ -152,16 +167,16 @@ export function createSession(ownerId: UserId, payload: unknown) {
     )).get();
     if (!approved?.approvedAt) throw new DomainError("invalid", "Scenario approval required");
     const record = { id:randomUUID(), ownerId, scenarioId:scenario.id, scenarioRevision:input.revision,
-      requestKey:input.requestKey, speechConfig:JSON.stringify(speech),
+      requestKey:input.requestKey, speechConfig:JSON.stringify(speech), mode:mode,
       state:"CREATED", version:1, createdAt:now() };
     tx.insert(interviewSessions).values(record).run();
-    addEvent(tx,record.id,"session.created",{scenarioRevision:input.revision});
+    addEvent(tx,record.id,"session.created",{scenarioRevision:input.revision,mode:mode});
     let state: SessionState = "CREATED";
     let version = 1;
-    for (const [action,type] of [["enterPreflight","preflight.entered"],["skipDemoPreflight","preflight.demo_skipped"],["start","interview.started"]] as const) {
+    for (const [action,type] of [["enterPreflight","preflight.entered"],["skipDemoPreflight",mode==="live"?"preflight.client_reported":"preflight.demo_skipped"],["start","interview.started"]] as const) {
       state = transition(state,action);
       version += 1;
-      addEvent(tx,record.id,type,{mode:"demo"});
+      addEvent(tx,record.id,type,{mode});
     }
     tx.update(interviewSessions).set({state,version}).where(eq(interviewSessions.id,record.id)).run();
     return getSession(ownerId,record.id);
@@ -177,7 +192,7 @@ export function submitAnswer(ownerId: UserId, id: string, payload: unknown) {
       .where(and(eq(interviewTurns.sessionId,id),eq(interviewTurns.clientTurnId,input.clientTurnId))).get();
     if (existing) {
       // The idempotency key is bound to the normalized command, not just the turn ID.
-      if (existing.answer !== input.answer || existing.answerSource !== input.source || existing.originalStt !== null || existing.sequence !== input.expectedTurnSequence)
+      if (existing.answer !== input.answer || existing.answerSource !== input.source || existing.originalStt !== (input.originalStt??null) || existing.sequence !== input.expectedTurnSequence)
         throw new DomainError("conflict", "Answer request key conflict");
       return getSession(ownerId,id);
     }
@@ -187,13 +202,22 @@ export function submitAnswer(ownerId: UserId, id: string, payload: unknown) {
     const sequence = (last?.sequence ?? 0) + 1;
     if (sequence > maxDemoTurns) throw new DomainError("invalid", "Demo turn limit reached");
     if (sequence !== input.expectedTurnSequence) throw new DomainError("conflict", "Stale question conflict");
+    if(session.mode==="demo" && (input.source!=="typed" || input.originalStt!==undefined || input.expectedQuestionId!==undefined))
+      throw new DomainError("invalid","Demo only accepts typed answers");
+    if(session.mode==="live" && input.source==="corrected" && !input.originalStt)
+      throw new DomainError("invalid","Correction requires original speech text");
     const speech = validateSpeechConfig(JSON.parse(session.speechConfig));
+    const activeQuestion = session.mode==="live"
+      ? tx.select().from(liveQuestions).where(and(eq(liveQuestions.sessionId,id),eq(liveQuestions.sequence,sequence))).get()
+      : null;
+    if(session.mode==="live" && (!activeQuestion || activeQuestion.id!==input.expectedQuestionId))
+      throw new DomainError("conflict","Stale or missing live question");
     tx.insert(interviewTurns).values({
       id:randomUUID(), sessionId:id, clientTurnId:input.clientTurnId, sequence,
-      question:getDemoQuestion(sequence-1, speech.interviewerLocale), answer:input.answer, answerSource:input.source,
-      originalStt:null, createdAt:now()
+      question:activeQuestion?.question??getDemoQuestion(sequence-1, speech.interviewerLocale), answer:input.answer, answerSource:input.source,
+      originalStt:input.originalStt??null, createdAt:now()
     }).run();
-    addEvent(tx,id,"answer.committed",{sequence,source:input.source});
+    addEvent(tx,id,"answer.committed",{sequence,source:input.source,clientProvidedSpeech:input.source!=="typed",questionId:activeQuestion?.id??null});
     return getSession(ownerId,id);
   });
 }
