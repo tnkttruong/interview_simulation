@@ -33,6 +33,8 @@ export default function LiveWorkspace({email}:{email:string}){
    const scId=scenarioIdOverride!==undefined?scenarioIdOverride:scenarioRef.current?.id;
    if(scId){
     url.searchParams.set("scenarioId",scId);
+   }else{
+    url.searchParams.delete("scenarioId");
    }
    const sessId=sessionIdOverride!==undefined?sessionIdOverride:sessionRef.current?.id;
    if(sessId&&(next==="meeting"||next==="results")){
@@ -345,6 +347,33 @@ export default function LiveWorkspace({email}:{email:string}){
   setSession(next);sessionRef.current=next;
   return next;
  }
+ async function cloneFromSession(id:string){
+  await run(async()=>{
+   const source=await api<{
+    role:string;jobDescription:string;focus:string;cvText:string;
+    cvFilename:string;source:"snapshot"|"legacy"
+   }>("/api/live/sessions/"+id+"/clone-source",{cache:"no-store"});
+   // The clone is an independent draft. No transcript or question history is copied.
+   const cloned=await api<Scenario>("/api/live/scenarios",{
+    method:"POST",body:JSON.stringify({
+     role:source.role,jobDescription:source.jobDescription,
+     focus:source.focus,cvText:source.cvText,cvFilename:source.cvFilename,
+     planImmediately:false
+    })
+   });
+   setRole(source.role);setJd(source.jobDescription);setFocus(source.focus);
+   setCvText(source.cvText);setCvName(source.cvFilename||"pasted-cv.txt");
+   setSession(null);sessionRef.current=null;setConsent(false);setFeedback("");
+   setHint("");setAnswer("");setRecognized("");setShowSuggestedAnswer(false);
+   answerKey.current=null;startKey.current=null;
+   await loadPlan(cloned.id);
+   setIsEditing(true);
+   changeStep("review",false,cloned.id,"");
+   setMessage(source.source==="legacy"
+    ?"New review created from the old meeting's saved CV and current JD. Verify the JD before generating the script."
+    :"New review created from the meeting's original JD and CV. Edit them or generate a new script.");
+  });
+ }
  async function continueSession(id:string){
   await run(async()=>{
    const selected=await refreshSession(id);
@@ -514,8 +543,16 @@ export default function LiveWorkspace({email}:{email:string}){
       onClick={create}>Create interview scenario</button>
     </section><section className="panel"><h2>Prior live sessions</h2>
       {history.filter(x=>x.mode==="live").length===0?<p>No previous AI sessions.</p>:
-       history.filter(x=>x.mode==="live").map(s=><div key={s.id} style={{display:"flex",alignItems:"center",borderBottom:"1px solid #e9edf6"}}><button className="list-button" style={{flex:1,borderBottom:0}} disabled={busy}
-        onClick={()=>continueSession(s.id)}>{new Date(s.createdAt).toLocaleString()} · {s.state} →</button><Link href={`/sessions/${s.id}`} style={{padding:"0 15px",fontSize:"13px",color:"#555ddb",textDecoration:"none",whiteSpace:"nowrap"}}>Detail ↗</Link></div>)}
+       history.filter(x=>x.mode==="live").map(s=><div key={s.id} className="prior-session-row">
+        <button className="list-button" disabled={busy}
+         onClick={()=>continueSession(s.id)}>{new Date(s.createdAt).toLocaleString()} · {s.state} →</button>
+        <div className="prior-session-actions">
+         <button type="button" className="btn secondary" disabled={busy}
+          aria-label={`Clone JD & CV from meeting ${new Date(s.createdAt).toLocaleString()}`}
+          onClick={()=>cloneFromSession(s.id)}>Clone JD & CV</button>
+         <Link href={`/sessions/${s.id}`}>Detail ↗</Link>
+        </div>
+       </div>)}
      <p className="muted small">PDF text extraction happens in your browser. The extracted CV text is saved on this server for AI planning. Voice audio is processed by Azure but is not saved by this app.</p>
     </section></div>}
     {step==="review"&&<div className="cols"><section className="panel">

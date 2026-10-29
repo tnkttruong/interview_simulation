@@ -4,7 +4,7 @@ import { and, count, desc, eq, gte } from "drizzle-orm";
 import { z } from "zod";
 import { DomainError, maxDemoTurns, validateSpeechConfig } from "@interview/core";
 import { db } from "./db/client";
-import { interviewSessions,interviewTurns,liveHints,liveQuestions,scenarioPlans,scenarios,workflowEvents } from "./db/schema";
+import { interviewSessions,interviewTurns,liveHints,liveQuestions,liveSessionSources,scenarioPlans,scenarios,workflowEvents } from "./db/schema";
 import { changeScenario,createScenario,createSession,getScenario,getSession } from "./demo";
 import {hintSchema,nextInterviewQuestion,planScenario,planSchema,proposeHint,promptVersion,revisePlan} from "./ai";
 import {assertReady} from "./ai-settings";
@@ -151,14 +151,44 @@ export async function planLiveScenario(ownerId:string,id:string,providedCvText?:
   return currentPlan(ownerId,id);
  });
 }
+/**
+ * Capture the JD and CV actually used when a meeting starts. The scenario can
+ * be edited later, but the source for this session must remain stable.
+ */
 export function startLive(ownerId:string,input:unknown) {
  assertReady(ownerId);
  const data=z.object({scenarioId:z.string().uuid(),revision:z.number().int().positive(),
   requestKey:z.string().uuid(),speech:z.unknown()}).parse(input);
- // Keep legacy start, approval, snapshot, ownership and idempotency invariants.
- planFor(data.scenarioId,data.revision);
+ const scenario=getScenario(ownerId,data.scenarioId);
+ const {row}=planFor(data.scenarioId,data.revision);
  validateSpeechConfig(data.speech);
- return createSession(ownerId,data,"live");
+ const started=createSession(ownerId,data,"live");
+ db.insert(liveSessionSources).values({
+  sessionId:started.id,role:scenario.role,jobDescription:scenario.jobDescription,
+  focus:scenario.focus,cvText:row.cvText,cvFilename:row.cvFilename,createdAt:Date.now()
+ }).onConflictDoNothing().run();
+ return started;
+}
+
+/** Return only the source JD/CV, never the session's answers or transcript. */
+export function getLiveSessionCloneSource(ownerId:string,id:string){
+ const session=owned(id,ownerId);
+ const saved=db.select().from(liveSessionSources).where(eq(liveSessionSources.sessionId,id)).get();
+ if(saved)return {
+  role:saved.role,jobDescription:saved.jobDescription,focus:saved.focus,
+  cvText:saved.cvText,cvFilename:saved.cvFilename,source:"snapshot" as const
+ };
+ // For sessions created before the snapshot migration, use the matching
+ // scenario revision's CV and the last saved JD (historical JD may have changed).
+ const scenario=getScenario(ownerId,session.scenarioId);
+ const revision=db.select().from(scenarioPlans)
+  .where(and(eq(scenarioPlans.scenarioId,session.scenarioId),
+   eq(scenarioPlans.revision,session.scenarioRevision))).get();
+ if(!revision?.cvText)throw new DomainError("not_found","Original CV is not available for this session");
+ return {
+  role:scenario.role,jobDescription:scenario.jobDescription,focus:scenario.focus,
+  cvText:revision.cvText,cvFilename:revision.cvFilename,source:"legacy" as const
+ };
 }
 export async function prepareLiveQuestion(ownerId:string,id:string){
  const session=owned(id,ownerId);

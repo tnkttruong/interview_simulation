@@ -101,6 +101,16 @@ export const scenarioPlans = sqliteTable("scenario_plans",{
   modelId:text("model_id").notNull(),
   createdAt:integer("created_at").notNull(),
 }, t=>[primaryKey({columns:[t.scenarioId,t.revision]})]);
+/** Immutable input snapshot for cloning a past live meeting, not its transcript. */
+export const liveSessionSources=sqliteTable("live_session_sources",{
+ sessionId:text("session_id").primaryKey().references(()=>interviewSessions.id,{onDelete:"cascade"}),
+ role:text("role").notNull(),
+ jobDescription:text("job_description").notNull(),
+ focus:text("focus").notNull(),
+ cvText:text("cv_text").notNull(),
+ cvFilename:text("cv_filename").notNull(),
+ createdAt:integer("created_at").notNull()
+});
 export const liveQuestions = sqliteTable("live_questions",{
   id:text("id").primaryKey(),
   sessionId:text("session_id").notNull().references(()=>interviewSessions.id,{onDelete:"cascade"}),
