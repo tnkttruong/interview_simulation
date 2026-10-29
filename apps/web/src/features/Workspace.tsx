@@ -1,11 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { createAuthClient } from "better-auth/react";
 import { voiceByLocale } from "@interview/core";
+import { checkMicrophone, checkSpeaker } from "./azure-client";
+import { extractPdf } from "./pdf-client";
 
 type Locale = keyof typeof voiceByLocale;
 type Screen = "dashboard"|"new"|"scenario"|"preflight"|"meeting"|"paused"|"results"|"history";
+const VALID_SCREENS: Screen[] = ["dashboard","new","scenario","preflight","meeting","paused","results","history"];
 type Scenario = {id:string;role:string;jobDescription:string;focus:string;latestRevision:number;revisions:{revision:number;approvedAt:number|null;notes:string}[]};
 type ScenarioSummary = Pick<Scenario,"id"|"role"|"focus"|"latestRevision">;
 type Page<T> = {items:T[];total:number;nextOffset:number|null};
@@ -28,6 +32,33 @@ async function api<T>(url:string,options?:RequestInit):Promise<T>{
 const toDate=(ts:number)=>new Date(ts).toLocaleString();
 export default function Workspace({userEmail}:{userEmail:string}) {
   const [screen,setScreen]=useState<Screen>("dashboard");
+  const [scenario,setScenario]=useState<Scenario|null>(null);
+
+  const scenarioRef=useRef<Scenario|null>(scenario);
+  scenarioRef.current=scenario;
+
+  const changeScreen=useCallback((next:Screen,replace:boolean=false,scenarioIdOverride?:string)=>{
+    setScreen(next);
+    if(typeof window!=="undefined"){
+      const url=new URL(window.location.href);
+      if(next==="dashboard"){
+        url.searchParams.delete("screen");
+        url.searchParams.delete("scenarioId");
+      }else{
+        url.searchParams.set("screen",next);
+        const scId=scenarioIdOverride!==undefined?scenarioIdOverride:scenarioRef.current?.id;
+        if(scId&&(next==="scenario"||next==="preflight")){
+          url.searchParams.set("scenarioId",scId);
+        }
+      }
+      const targetUrl=url.pathname+(url.search?url.search:"");
+      if(replace){
+        window.history.replaceState({screen:next},"",targetUrl);
+      }else{
+        window.history.pushState({screen:next},"",targetUrl);
+      }
+    }
+  },[]);
   const [hydrated,setHydrated]=useState(false);
   const [scenarios,setScenarios]=useState<ScenarioSummary[]>([]);
   const [scenarioTotal,setScenarioTotal]=useState(0);
@@ -35,13 +66,16 @@ export default function Workspace({userEmail}:{userEmail:string}) {
   const [sessions,setSessions]=useState<Session[]>([]);
   const [sessionTotal,setSessionTotal]=useState(0);
   const [sessionNext,setSessionNext]=useState<number|null>(null);
-  const [scenario,setScenario]=useState<Scenario|null>(null);
   const [session,setSession]=useState<Session|null>(null);
   const [events,setEvents]=useState<Event[]>([]);
   const [eventsSessionId,setEventsSessionId]=useState<string|null>(null);
   const [role,setRole]=useState("Senior Backend Engineer");
   const [focus,setFocus]=useState("Node.js, PostgreSQL, system design");
   const [jd,setJd]=useState("Design reliable backend services, debug database performance, mentor engineers and communicate trade-offs.");
+  const [isEditingScenario,setIsEditingScenario]=useState(false);
+  const [editRole,setEditRole]=useState("");
+  const [editFocus,setEditFocus]=useState("");
+  const [editJd,setEditJd]=useState("");
   const [revisionNotes,setRevisionNotes]=useState("");
   const [interviewerLocale,setInterviewerLocale]=useState<Locale>("en-US");
   const [candidateLocale,setCandidateLocale]=useState<Locale>("vi-VN");
@@ -52,8 +86,58 @@ export default function Workspace({userEmail}:{userEmail:string}) {
   const [busy,setBusy]=useState(false);
   const [notice,setNotice]=useState("");
   const [error,setError]=useState("");
+  const [micOk,setMicOk]=useState(false);
+  const [speakerOk,setSpeakerOk]=useState(false);
+  const [voicePlaying,setVoicePlaying]=useState(false);
+  const [deviceNotice,setDeviceNotice]=useState("");
   const requestKeyRef=useRef<string|null>(null);
   const answerKeyRef=useRef<string|null>(null);
+
+  async function testSpeaker(){
+    try{
+      setDeviceNotice("Testing speaker: playing tone...");
+      await checkSpeaker();
+      setSpeakerOk(true);
+      setDeviceNotice("✓ Speaker test passed (tone played).");
+    }catch(e){
+      setSpeakerOk(false);
+      setDeviceNotice(e instanceof Error?e.message:"Speaker test failed.");
+    }
+  }
+
+  async function testMicrophone(){
+    try{
+      setDeviceNotice("Testing microphone: requesting browser permission...");
+      await checkMicrophone();
+      setMicOk(true);
+      setDeviceNotice("✓ Microphone access verified; audio tracks stopped.");
+    }catch(e){
+      setMicOk(false);
+      setDeviceNotice(e instanceof Error?e.message:"Microphone test failed.");
+    }
+  }
+
+  function previewVoice(){
+    if(typeof window==="undefined")return;
+    if("speechSynthesis" in window){
+      window.speechSynthesis.cancel();
+      const phrase=interviewerLocale==="vi-VN"
+        ?"Xin chào! Đây là bản nghe thử giọng nói của người phỏng vấn."
+        :"Hello! This is a preview of the interviewer voice.";
+      const utterance=new SpeechSynthesisUtterance(phrase);
+      utterance.lang=interviewerLocale;
+      const voices=window.speechSynthesis.getVoices();
+      const match=voices.find(v=>v.lang.startsWith(interviewerLocale.split("-")[0]));
+      if(match)utterance.voice=match;
+      setVoicePlaying(true);
+      utterance.onend=()=>setVoicePlaying(false);
+      utterance.onerror=()=>setVoicePlaying(false);
+      window.speechSynthesis.speak(utterance);
+      setDeviceNotice(`✓ Playing voice preview in ${interviewerLocale}.`);
+    }else{
+      setDeviceNotice("Speech synthesis is not supported by your browser.");
+    }
+  }
 
   const refresh=useCallback(async()=>{
     const [a,b]=await Promise.all([api<Page<ScenarioSummary>>("/api/demo/scenarios?limit=20"),api<Page<Session>>("/api/demo/sessions?limit=20")]);
@@ -61,6 +145,71 @@ export default function Workspace({userEmail}:{userEmail:string}) {
     setSessions(b.items);setSessionTotal(b.total);setSessionNext(b.nextOffset);
   },[]);
   useEffect(()=>{setHydrated(true);refresh().catch(e=>setError(String(e)));},[refresh]);
+
+  const sessionRef=useRef<Session|null>(session);
+  sessionRef.current=session;
+
+  useEffect(()=>{
+    if(typeof window!=="undefined"&&scenario?.id){
+      sessionStorage.setItem("last_scenario_id",scenario.id);
+    }
+  },[scenario]);
+
+  const syncFromUrl=useCallback(async()=>{
+    if(typeof window==="undefined")return;
+    const params=new URLSearchParams(window.location.search);
+    const s=params.get("screen");
+    let scId=params.get("scenarioId");
+    const sessId=params.get("sessionId");
+
+    if(!scId&&(s==="scenario"||s==="preflight")){
+      const stored=sessionStorage.getItem("last_scenario_id");
+      if(stored)scId=stored;
+    }
+
+    if(scId&&scenarioRef.current?.id!==scId){
+      try{
+        const loaded=await api<Scenario>(`/api/demo/scenarios/${scId}`);
+        setScenario(loaded);
+      }catch(err){
+        console.error("Failed to load scenario from URL param:", err);
+      }
+    }
+
+    if(sessId&&sessionRef.current?.id!==sessId){
+      try{
+        const loadedSession=await api<Session>(`/api/demo/sessions/${sessId}`);
+        setSession(loadedSession);
+      }catch(err){
+        console.error("Failed to load session from URL param:", err);
+      }
+    }
+
+    if(s==="preflight"&&scId){
+      window.location.replace(`/scenarios/${scId}/preflight`);
+      return;
+    }
+
+    if(s&&VALID_SCREENS.includes(s as Screen)){
+      if((s==="meeting"||s==="paused"||s==="results")&&!sessionRef.current&&!sessId){
+        setScreen("dashboard");
+        const url=new URL(window.location.href);
+        url.searchParams.delete("screen");
+        window.history.replaceState({screen:"dashboard"},"",url.pathname+(url.search?url.search:""));
+      }else{
+        setScreen(s as Screen);
+      }
+    }else{
+      setScreen("dashboard");
+    }
+  },[]);
+
+  useEffect(()=>{
+    void syncFromUrl();
+    window.addEventListener("popstate",syncFromUrl);
+    return ()=>window.removeEventListener("popstate",syncFromUrl);
+  },[syncFromUrl]);
+
   async function loadMore(kind:"scenarios"|"sessions"){
     const offset=kind==="scenarios"?scenarioNext:sessionNext;
     if(offset===null)return;
@@ -85,12 +234,19 @@ export default function Workspace({userEmail}:{userEmail:string}) {
   async function create(){
     await run(async()=>{
       const created=await api<Scenario>("/api/demo/scenarios",{method:"POST",body:JSON.stringify({role,jobDescription:jd,focus})});
-      setScenario(await api<Scenario>(`/api/demo/scenarios/${created.id}`));requestKeyRef.current=null;setConsent(false);
-      setNotice("Deterministic demo scenario created; no LLM called.");setScreen("scenario");await refresh();
+      const loaded=await api<Scenario>(`/api/demo/scenarios/${created.id}`);
+      setScenario(loaded);requestKeyRef.current=null;setConsent(false);
+      setNotice("Deterministic demo scenario created; no LLM called.");
+      changeScreen("scenario",false,loaded.id);
+      await refresh();
     });
   }
   async function openScenario(id:string){
-    await run(async()=>{setScenario(await api<Scenario>(`/api/demo/scenarios/${id}`));setConsent(false);requestKeyRef.current=null;setScreen("scenario");});
+    await run(async()=>{
+      const selected=await api<Scenario>(`/api/demo/scenarios/${id}`);
+      setScenario(selected);setConsent(false);requestKeyRef.current=null;
+      changeScreen("scenario",false,id);
+    });
   }
   async function changeScenario(action:"approve"|"revise"){
     if(!scenario)return;
@@ -100,8 +256,48 @@ export default function Workspace({userEmail}:{userEmail:string}) {
       })});
       setScenario(next);setRevisionNotes("");
       setNotice(action==="approve"?"Scenario approved. You can configure your meeting.":"New draft revision created. Approval is required again.");
-      if(action==="approve"){setConsent(false);requestKeyRef.current=null;setScreen("preflight");}
+      if(action==="approve"){
+        setConsent(false);
+        requestKeyRef.current=null;
+        if(typeof window!=="undefined"){
+          window.location.assign(`/scenarios/${next.id}/preflight`);
+          return;
+        }
+      }
       await refresh();
+    });
+  }
+  async function updateScenarioDetails(){
+    if(!scenario)return;
+    await run(async()=>{
+      const updated=await api<Scenario>(`/api/demo/scenarios/${scenario.id}`,{
+        method:"PATCH",
+        body:JSON.stringify({role:editRole,jobDescription:editJd,focus:editFocus})
+      });
+      setScenario(updated);
+      setIsEditingScenario(false);
+      setNotice("Scenario updated successfully.");
+      await refresh();
+    });
+  }
+  async function upload(file:File, target: "jd" | "cv" = "cv"){
+    await run(async()=>{
+      if(file.size>4*1024*1024)throw new Error("File limit is 4 MB");
+      let content:string;
+      if(file.name.toLowerCase().endsWith(".pdf"))content=await extractPdf(file);
+      else{
+        const data=new FormData();data.append("file",file);
+        const result=await fetch("/api/live/cv",{method:"POST",body:data,credentials:"same-origin"});
+        const parsed=await result.json();
+        if(!result.ok)throw new Error(parsed.error||"File extraction failed");
+        content=parsed.cvText;
+      }
+      if(target==="cv"){
+        setNotice("Extracted "+content.length+" characters from "+file.name+".");
+      }else{
+        setJd(content);setEditJd(content);
+        setNotice("Extracted "+content.length+" characters from "+file.name+" into Job Description.");
+      }
     });
   }
   function onLocaleChange(value:Locale){
@@ -111,7 +307,7 @@ export default function Workspace({userEmail}:{userEmail:string}) {
   async function start(){
     if(!scenario)return setError("Create a scenario first");
     const latest=scenario.revisions.find(r=>r.revision===scenario.latestRevision);
-    if(!latest?.approvedAt){setError("Approve the latest scenario revision before starting");setScreen("scenario");return;}
+    if(!latest?.approvedAt){setError("Approve the latest scenario revision before starting");changeScreen("scenario");return;}
     if(!consent){setError("You must explicitly consent to transcript retention");return;}
     await run(async()=>{
       if(!requestKeyRef.current)requestKeyRef.current=crypto.randomUUID();
@@ -119,7 +315,7 @@ export default function Workspace({userEmail}:{userEmail:string}) {
         scenarioId:scenario.id,revision:scenario.latestRevision,requestKey:requestKeyRef.current,
         speech:{interviewerLocale,interviewerVoiceId:voice,candidateSttLocale:candidateLocale,consentToTranscript:consent}
       })});
-      setSession(created);setEvents([]);setEventsSessionId(null);setConsent(false);requestKeyRef.current=null;setScreen("meeting");setNotice("Demo interview started. No audio is captured.");
+      setSession(created);setEvents([]);setEventsSessionId(null);setConsent(false);requestKeyRef.current=null;changeScreen("meeting");setNotice("Demo interview started. No audio is captured.");
       await refresh();
     });
   }
@@ -127,7 +323,7 @@ export default function Workspace({userEmail}:{userEmail:string}) {
     await run(async()=>{
       const selected=await api<Session>(`/api/demo/sessions/${id}`);
       setSession(selected);setEvents([]);setEventsSessionId(null);setAnswer("");answerKeyRef.current=null;
-      setScreen(selected.state==="PAUSED"||selected.state==="INTERRUPTED"?"paused":selected.state==="COMPLETED"?"results":"meeting");
+      changeScreen(selected.state==="PAUSED"||selected.state==="INTERRUPTED"?"paused":selected.state==="COMPLETED"?"results":"meeting");
     });
   }
   async function sessionAction(action:"pause"|"resume"|"finish"|"cancel"){
@@ -137,7 +333,7 @@ export default function Workspace({userEmail}:{userEmail:string}) {
         method:"PATCH",body:JSON.stringify({action,expectedVersion:session.version})
       });
       setSession(updated);
-      setScreen(action==="pause"?"paused":action==="finish"?"results":"meeting");
+      changeScreen(action==="pause"?"paused":action==="finish"?"results":"meeting");
       await refresh();
     });
   }
@@ -170,7 +366,7 @@ export default function Workspace({userEmail}:{userEmail:string}) {
       const selectedId=session.id;
       setEventsSessionId(null);setEvents([]);
       const list=await api<Event[]>(`/api/demo/sessions/${selectedId}?include=events`);
-      setEvents(list);setEventsSessionId(selectedId);setScreen("history");
+      setEvents(list);setEventsSessionId(selectedId);changeScreen("history");
     });
   }
   const approved=!!scenario?.revisions.find(r=>r.revision===scenario.latestRevision)?.approvedAt;
@@ -181,8 +377,8 @@ export default function Workspace({userEmail}:{userEmail:string}) {
     <aside className="sidebar">
       <div className="brand">◉ <strong>Interview<br/>Simulation</strong></div>
       <div className="side-caption">OPEN-SOURCE · P0 DEMO</div>
-      <nav aria-label="Main navigation"><a href="/live" className="live-entry">✦ AI Interview (P1–P3) →</a><a href="/settings" className="live-entry">⚙ AI Settings</a>{labels.map(([name,label])=>
-        <button key={name} className={screen===name?"active":""} onClick={()=>{setError("");if(name==="new"){setScenario(null);setConsent(false);}setScreen(name);}}>{label}</button>)}</nav>
+      <nav aria-label="Main navigation"><Link href="/live" className="live-entry">✦ AI Interview (P1–P3) →</Link><Link href="/settings" className="live-entry">⚙ AI Settings</Link>{labels.map(([name,label])=>
+        <button key={name} className={screen===name?"active":""} onClick={()=>{setError("");if(name==="new"){setScenario(null);setConsent(false);if(typeof window!=="undefined")sessionStorage.removeItem("last_scenario_id");}changeScreen(name);}}>{label}</button>)}</nav>
       <div className="sidebar-bottom"><small>Offline mock prompts. No STT, TTS or LLM calls.</small></div>
     </aside>
     <div className="main-area">
@@ -194,35 +390,80 @@ export default function Workspace({userEmail}:{userEmail:string}) {
         {notice&&<div className="alert info" role="status">{notice}<button className="dismiss" onClick={()=>setNotice("")}>×</button></div>}
         {screen==="dashboard"&&<section><p className="eyebrow">01 / Dashboard</p><h1>Your interview workspace</h1>
           <p className="lead">Prepare with a job description, approve your questions, and practice a deterministic mock interview.</p>
-          <div className="hero"><div><h2>Ready for your next interview?</h2><p>Practice without a paid Azure or LLM API key.</p></div><button className="btn primary" onClick={()=>setScreen("new")}>+ Create interview</button></div>
+          <div className="hero"><div><h2>Ready for your next interview?</h2><p>Practice without a paid Azure or LLM API key.</p></div><button className="btn primary" onClick={()=>changeScreen("new")}>+ Create interview</button></div>
           <div className="stats"><article className="panel"><span>Scenarios</span><strong>{scenarioTotal}</strong></article>
             <article className="panel"><span>Sessions</span><strong>{sessionTotal}</strong></article>
             <article className="panel"><span>Completed (loaded)</span><strong>{sessions.filter(s=>s.state==="COMPLETED").length}</strong></article></div>
           <div className="panel"><h2>Recent sessions</h2>{sessions.length===0?<p className="muted">No interviews yet. Create one to begin.</p>:
-            sessions.slice(0,5).map(s=><button className="list-button" key={s.id} onClick={()=>openSession(s.id)}>{toDate(s.createdAt)} · {s.state} →</button>)}</div>
+            sessions.slice(0,5).map(s=><div key={s.id} style={{display:"flex",alignItems:"center",borderBottom:"1px solid #e9edf6"}}><button className="list-button" style={{flex:1,borderBottom:0}} onClick={()=>openSession(s.id)}>{toDate(s.createdAt)} · {s.state} →</button><Link href={`/sessions/${s.id}`} style={{padding:"0 15px",fontSize:"13px",color:"#555ddb",textDecoration:"none",whiteSpace:"nowrap"}}>Detail ↗</Link></div>)}</div>
         </section>}
         {screen==="new"&&<section><p className="eyebrow">02 / New interview</p><h1>Describe the job</h1><p className="lead">P0 uses local fixtures. PDF/DOCX parsing and real scenario generation arrive in P1.</p>
           <div className="cols"><div className="panel form-grid">
             <label>Role<input maxLength={180} value={role} onChange={e=>setRole(e.target.value)}/></label>
             <label>Tech stack / focus<input maxLength={1500} value={focus} onChange={e=>setFocus(e.target.value)}/></label>
+            <label>Upload Job description (PDF, DOCX, TXT, MD; ≤4 MB)
+              <input type="file" accept=".pdf,.docx,.txt,.md" disabled={busy} onChange={e=>{const f=e.target.files?.[0];if(f)void upload(f,"jd");}}/>
+            </label>
             <label>Job description<textarea rows={8} value={jd} maxLength={20000} onChange={e=>setJd(e.target.value)}/></label>
-            <div className="disabled-upload" aria-disabled="true">CV PDF / DOCX — available in P1, not P0 demo</div>
+            <label>Upload CV (optional file: PDF, DOCX, TXT, MD; ≤4 MB)
+              <input type="file" accept=".pdf,.docx,.txt,.md" disabled={busy} onChange={e=>{const f=e.target.files?.[0];if(f)void upload(f,"cv");}}/>
+            </label>
             <button className="btn primary" disabled={busy} onClick={create}>Create demo scenario →</button>
           </div><div className="panel"><h2>Planned experience</h2><p>Review the draft, request a new revision, explicitly approve it, then choose interviewer language, voice and your input language.</p><p className="muted">Uploaded documents are not accepted in P0. No CV files are stored or transmitted.</p></div></div>
         </section>}
         {screen==="scenario"&&<section><p className="eyebrow">03 / Scenario planning</p><h1>Review & approve</h1>
           {!scenario?<div className="panel"><p>Select an existing scenario or create a new one.</p>{scenarios.map(s=>
-            <button className="list-button" key={s.id} onClick={()=>openScenario(s.id)}>{s.role} · v{s.latestRevision}</button>)}
+            <div key={s.id} style={{display:"flex",alignItems:"center",borderBottom:"1px solid #e9edf6"}}><button className="list-button" style={{flex:1,borderBottom:0}} onClick={()=>openScenario(s.id)}>{s.role} · v{s.latestRevision}</button><Link href={`/scenarios/${s.id}`} style={{padding:"0 15px",fontSize:"13px",color:"#555ddb",textDecoration:"none",whiteSpace:"nowrap"}}>Detail ↗</Link></div>)}
             {scenarioNext!==null&&<button className="btn secondary" disabled={busy} onClick={()=>loadMore("scenarios")}>Load more scenarios</button>}
-            <button className="btn primary" onClick={()=>setScreen("new")}>Create new</button></div>:
+            <button className="btn primary" onClick={()=>changeScreen("new")}>Create new</button></div>:
           <div className="cols"><div className="panel">
-            <span className="pill">{approved?"Approved":"Draft"} v{scenario.latestRevision}</span>
-            <h2>{scenario.role}</h2><p><b>Focus:</b> {scenario.focus}</p>
-            <h3>Scenario stages (deterministic demo)</h3><ol><li>Background and prior projects</li><li>Production troubleshooting</li><li>System design and trade-offs</li><li>Wrap-up</li></ol>
-            <p><b>Source JD:</b> {scenario.jobDescription}</p>
-            <p className="muted">Previous approved revisions remain immutable after edits.</p>
-            <button className="btn secondary" onClick={()=>{setScenario(null);setConsent(false);}}>Browse scenarios</button>
-            <button className="btn primary" disabled={busy} onClick={()=>changeScenario("approve")}>{approved?"Continue to preflight":"✓ Approve latest revision"}</button>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"12px",flexWrap:"wrap",gap:"8px"}}>
+              <div style={{display:"flex",gap:"8px",alignItems:"center"}}>
+                <span className="pill">{approved?"Approved":"Draft"} v{scenario.latestRevision}</span>
+                <Link href={`/scenarios/${scenario.id}`} className="btn quiet small" style={{color:"#555ddb"}}>Open full page ↗</Link>
+              </div>
+              {!isEditingScenario&&<button className="btn secondary" onClick={()=>{
+                setEditRole(scenario.role);
+                setEditFocus(scenario.focus);
+                setEditJd(scenario.jobDescription);
+                setIsEditingScenario(true);
+              }} disabled={busy}>Update</button>}
+            </div>
+            {isEditingScenario ? (
+              <div className="form-grid">
+                <h3>Edit scenario</h3>
+                <label>Role<input value={editRole} maxLength={180} onChange={e=>setEditRole(e.target.value)} disabled={busy}/></label>
+                <label>Tech stack / focus<input value={editFocus} maxLength={1500} onChange={e=>setEditFocus(e.target.value)} disabled={busy}/></label>
+                <label>Upload new Job description (PDF, DOCX, TXT, MD; ≤4 MB)
+                  <input type="file" accept=".pdf,.docx,.txt,.md" disabled={busy} onChange={e=>{const f=e.target.files?.[0];if(f)void upload(f,"jd");}}/>
+                </label>
+                <label>Job description<textarea rows={6} value={editJd} maxLength={20000} onChange={e=>setEditJd(e.target.value)} disabled={busy}/></label>
+                <label>Upload new CV (optional file: PDF, DOCX, TXT, MD; ≤4 MB)
+                  <input type="file" accept=".pdf,.docx,.txt,.md" disabled={busy} onChange={e=>{const f=e.target.files?.[0];if(f)void upload(f,"cv");}}/>
+                </label>
+                <div style={{display:"flex",gap:"8px"}}>
+                  <button className="btn primary" onClick={updateScenarioDetails} disabled={busy||editRole.trim().length<3||editJd.trim().length<10}>Save update</button>
+                  <button className="btn secondary" onClick={()=>setIsEditingScenario(false)} disabled={busy}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <h2>{scenario.role}</h2><p><b>Focus:</b> {scenario.focus}</p>
+                <h3>Scenario stages (deterministic demo)</h3><ol><li>Background and prior projects</li><li>Production troubleshooting</li><li>System design and trade-offs</li><li>Wrap-up</li></ol>
+                <p><b>Source JD:</b> {scenario.jobDescription}</p>
+                <p className="muted">Previous approved revisions remain immutable after edits.</p>
+                <button className="btn secondary" onClick={()=>{setScenario(null);setConsent(false);}}>Browse scenarios</button>
+                {approved ? (
+                  <Link href={`/scenarios/${scenario.id}/preflight`} className="btn primary">
+                    Continue to preflight →
+                  </Link>
+                ) : (
+                  <button className="btn primary" disabled={busy} onClick={()=>changeScenario("approve")}>
+                    ✓ Approve latest revision
+                  </button>
+                )}
+              </>
+            )}
           </div><div className="panel"><h2>Planner revision chat (demo)</h2>
             {scenario.revisions.map(r=><p key={r.revision} className="chat-bubble">v{r.revision}: {r.notes} {r.approvedAt?"✓ approved":""}</p>)}
             <label>Request a revision<textarea placeholder="Ask to emphasize databases, system design, communication..." rows={4}
@@ -237,7 +478,9 @@ export default function Workspace({userEmail}:{userEmail:string}) {
               <option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="vi-VN">Tiếng Việt</option></select></label>
             <label>AI interviewer voice<select value={voice} onChange={e=>setVoice(e.target.value)}>
               {voiceByLocale[interviewerLocale].map(v=><option key={v} value={v}>{v}</option>)}</select></label>
-            <button className="btn secondary" onClick={()=>setNotice("Demo preview only: no Azure voice is played.")}>▶ Preview voice (mock)</button>
+            <button className="btn secondary" type="button" onClick={previewVoice} disabled={voicePlaying}>
+              {voicePlaying?"🔊 Playing voice...":"▶ Preview voice (mock)"}
+            </button>
             <label>Your microphone input language<select value={candidateLocale} onChange={e=>setCandidateLocale(e.target.value as Locale)}>
               <option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="vi-VN">Tiếng Việt</option></select></label>
             <p className="soft-notice">P0 shows scripted interviewer questions in {interviewerLocale} (text only, no audio). Future voice: {voice}. Candidate input locale: {candidateLocale}. No silent translation.</p>
@@ -245,16 +488,29 @@ export default function Workspace({userEmail}:{userEmail:string}) {
               I explicitly consent to save this practice transcript and workflow evidence on this self-hosted server.</label>
             <p className="muted small">No raw audio is recorded. Your practice data remains in SQLite until you remove it using future data controls or the server operator retention process.</p>
             <button className="btn primary" disabled={!approved||!consent||busy} onClick={start}>Start meeting →</button>
-            {!approved&&<p className="error" role="status">Approve the latest scenario version before starting.</p>}
+            {!scenario ? (
+              <p className="error" role="status">
+                No scenario selected. Please <button type="button" onClick={()=>changeScreen("scenario")} style={{background:"none",border:"none",color:"#3b82f6",textDecoration:"underline",cursor:"pointer",padding:0,font:"inherit"}}>select or create a scenario</button> first.
+              </p>
+            ) : !approved ? (
+              <p className="error" role="status">Approve the latest scenario version before starting.</p>
+            ) : null}
           </div><div className="panel"><h2>Device check</h2>
-            <div className="device-row"><button className="btn secondary" onClick={()=>setNotice("Microphone test is a demo placeholder, not an actual permission check.")}>🎙 Test mic (mock)</button>
-              <button className="btn secondary" onClick={()=>setNotice("Speaker test is a demo placeholder, not real playback.")}>🔊 Test speaker (mock)</button></div>
+            <div className="device-row">
+              <button className="btn secondary" type="button" onClick={testMicrophone}>
+                🎙 Test mic {micOk?"✓":"(mock)"}
+              </button>
+              <button className="btn secondary" type="button" onClick={testSpeaker}>
+                🔊 Test speaker {speakerOk?"✓":"(mock)"}
+              </button>
+            </div>
+            {deviceNotice&&<p className="soft-notice" style={{marginTop:"12px"}}>{deviceNotice}</p>}
             <h3>Meeting policy</h3><p>Half-duplex · typed-answer fallback · scripted interviewer</p>
-            <p>Raw audio: <b>off</b></p><p>Scenario: <b>{scenario?.role??"Not selected"}</b> {approved?"✓ approved":"not approved"}</p>
+            <p>Raw audio: <b>off</b></p><p>Scenario: <b>{scenario?.role??"Not selected"}</b> {scenario ? (approved?"✓ approved":"not approved") : "(none selected)"}</p>
           </div></div>
         </section>}
         {screen==="meeting"&&<section><p className="eyebrow">05 / Meeting</p><h1>{session?.scenario?.role??"Live meeting"} <span className="pill">{session?.state??"No session"}</span></h1>
-          {!session?<div className="panel"><p>Create and start a practice session in Preflight.</p><button className="btn primary" onClick={()=>setScreen("preflight")}>Go to preflight</button></div>:
+          {!session?<div className="panel"><p>Create and start a practice session in Preflight.</p><button className="btn primary" onClick={()=>changeScreen("preflight")}>Go to preflight</button></div>:
           <div className="meeting-layout"><div>
             <div className="meeting-video"><div className="avatar">👩🏻‍💼</div><strong>AI Interviewer · scripted demo</strong>
               <p>{session.nextQuestion??"Interview not currently accepting answers."}</p></div>
@@ -281,11 +537,12 @@ export default function Workspace({userEmail}:{userEmail:string}) {
             <p>Answers recorded: <b>{session?.turns?.length??0}</b></p>
             <p>Scoring, rubric evidence and model evaluation are deliberately not implemented until P4.</p>
             <button className="btn primary" onClick={showEvents} disabled={!session||busy}>Review transcript & workflow events</button>
+            {session&&<Link href={`/sessions/${session.id}`} className="btn secondary" style={{marginLeft:"8px"}}>Full session page ↗</Link>}
           </div></section>}
         {screen==="history"&&<section><p className="eyebrow">08 / History & audit</p><h1>Durable session history</h1>
           <div className="panel"><h2>Sessions</h2>{sessions.length===0?<p className="muted">No practice sessions recorded yet.</p>:
-            sessions.map(s=><button key={s.id} className="list-button" onClick={()=>openSession(s.id)}>
-              {toDate(s.createdAt)} · {s.state} · scenario revision {s.scenarioRevision} →</button>)}
+            sessions.map(s=><div key={s.id} style={{display:"flex",alignItems:"center",borderBottom:"1px solid #e9edf6"}}><button className="list-button" style={{flex:1,borderBottom:0}} onClick={()=>openSession(s.id)}>
+              {toDate(s.createdAt)} · {s.state} · scenario revision {s.scenarioRevision} →</button><Link href={`/sessions/${s.id}`} style={{padding:"0 15px",fontSize:"13px",color:"#555ddb",textDecoration:"none",whiteSpace:"nowrap"}}>Detail ↗</Link></div>)}
             {sessionNext!==null&&<button className="btn secondary" disabled={busy} onClick={()=>loadMore("sessions")}>Load more sessions</button>}</div>
           {session&&<div className="panel"><h2>Selected session evidence</h2>
             <button className="btn secondary" onClick={showEvents} disabled={busy}>Load sanitized workflow events</button>

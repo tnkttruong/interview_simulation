@@ -118,6 +118,26 @@ export function changeScenario(ownerId: UserId, id: string, payload: unknown, pl
     return getScenario(ownerId,id);
   });
 }
+const updateScenarioInput = z.object({
+  role: z.string().trim().min(3).max(180).optional(),
+  jobDescription: z.string().trim().min(10).max(20000).optional(),
+  focus: z.string().trim().max(1500).optional(),
+});
+export function updateScenario(ownerId: UserId, id: string, payload: unknown) {
+  const data = updateScenarioInput.parse(payload);
+  return db.transaction((tx) => {
+    const scenario = tx.select().from(scenarios).where(and(eq(scenarios.id, id), eq(scenarios.ownerId, ownerId))).get();
+    if (!scenario) throw new DomainError("not_found", "Scenario not found");
+    const toUpdate: Partial<typeof scenarios.$inferInsert> = {};
+    if (data.role !== undefined) toUpdate.role = data.role;
+    if (data.jobDescription !== undefined) toUpdate.jobDescription = data.jobDescription;
+    if (data.focus !== undefined) toUpdate.focus = data.focus;
+    if (Object.keys(toUpdate).length > 0) {
+      tx.update(scenarios).set(toUpdate).where(eq(scenarios.id, id)).run();
+    }
+    return getScenario(ownerId, id);
+  });
+}
 export function listSessions(ownerId: UserId, limit: number, offset: number, mode?: "live" | "demo") {
   const filter=mode?and(eq(interviewSessions.ownerId,ownerId),eq(interviewSessions.mode,mode)):eq(interviewSessions.ownerId,ownerId);
   const total = db.select({value:count()}).from(interviewSessions)

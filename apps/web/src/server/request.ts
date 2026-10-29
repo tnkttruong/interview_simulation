@@ -55,9 +55,9 @@ export function safeError(error: unknown) {
       case "transition": return errorResponse(error.message, 409);
       case "quota": return errorResponse(error.message, 409);
       case "limit": return errorResponse(error.message, 429);
-      case "conflict": return errorResponse("Version or idempotency conflict", 409);
-      case "not_found": return errorResponse("Resource not found", 404);
-      case "invalid": return errorResponse("Request could not be completed", 400);
+      case "conflict": return errorResponse(error.message || "Version or idempotency conflict", 409);
+      case "not_found": return errorResponse(error.message || "Resource not found", 404);
+      case "invalid": return errorResponse(error.message || "Request could not be completed", 400);
     }
   }
   if (error instanceof Error) {
@@ -67,7 +67,7 @@ export function safeError(error: unknown) {
     if (error.message.includes("UNIQUE constraint")) return errorResponse("Conflicting request", 409);
     if (error.message.includes("FOREIGN KEY constraint")) return errorResponse("Invalid reference", 400);
   }
-  // Unexpected failure: log only the error name (never message/stack, which may contain user data).
-  logger.error({ errorName: error instanceof Error ? error.name : "unknown" }, "api.unexpected_error");
-  return errorResponse("Request could not be completed", 500);
+  console.error("api.unexpected_error:", error);
+  logger.error({ errorName: error instanceof Error ? error.name : "unknown", errorMsg: error instanceof Error ? error.message : String(error) }, "api.unexpected_error");
+  return errorResponse(error instanceof Error ? error.message : "Request could not be completed", 500);
 }

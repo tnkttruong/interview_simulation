@@ -12,7 +12,8 @@ import {withAiBudget} from "./ai-budget";
 
 const created=z.object({role:z.string().trim().min(3).max(180),jobDescription:z.string().trim().min(10).max(20000),
   focus:z.string().trim().max(1500).default(""),cvText:z.string().trim().min(15).max(30000),
-  cvFilename:z.string().trim().max(180).default("pasted-cv.txt")});
+  cvFilename:z.string().trim().max(180).default("pasted-cv.txt"),
+  planImmediately:z.boolean().optional().default(true)});
 const instruction=z.object({feedback:z.string().trim().min(3).max(1000),expectedRevision:z.number().int().positive()});
 function owned(id:string,ownerId:string){
   const session=db.select().from(interviewSessions).where(and(eq(interviewSessions.id,id),eq(interviewSessions.ownerId,ownerId))).get();
@@ -21,7 +22,7 @@ function owned(id:string,ownerId:string){
 }
 function planFor(scenarioId:string,revision:number){
  const row=db.select().from(scenarioPlans).where(and(eq(scenarioPlans.scenarioId,scenarioId),eq(scenarioPlans.revision,revision))).get();
- if(!row)throw new DomainError("invalid","Live scenario plan not available");
+ if(!row||!row.planJson)throw new DomainError("invalid","Live scenario plan not available");
  return {row,plan:planSchema.parse(JSON.parse(row.planJson))};
 }
 function event(tx:typeof db,sessionId:string,type:string,metadata:Record<string,unknown>){
@@ -31,18 +32,28 @@ function event(tx:typeof db,sessionId:string,type:string,metadata:Record<string,
 }
 export async function createLiveScenario(ownerId:string,payload:unknown){
  const input=created.parse(payload);
-return withAiBudget(ownerId,{"action":"create","payload":input},async()=>{
- // Check before invoking billable AI; createScenario rechecks inside its transaction.
- const total=db.select({n:count()}).from(scenarios).where(eq(scenarios.ownerId,ownerId)).get()!.n;
- const recent=db.select({n:count()}).from(scenarios).where(and(eq(scenarios.ownerId,ownerId),
-  gte(scenarios.createdAt,Date.now()-3600000))).get()!.n;
- if(total>=100||recent>=12)throw new DomainError("limit","Scenario creation quota reached");
- const generated=await planScenario(ownerId,input.role,input.jobDescription,input.cvText,input.focus);
- const scenario=createScenario(ownerId,{role:input.role,jobDescription:input.jobDescription,focus:input.focus},{
-   cvText:input.cvText,cvFilename:input.cvFilename,planJson:JSON.stringify(generated.output),modelId:generated.modelId
+ if(!input.planImmediately){
+  const total=db.select({n:count()}).from(scenarios).where(eq(scenarios.ownerId,ownerId)).get()!.n;
+  const recent=db.select({n:count()}).from(scenarios).where(and(eq(scenarios.ownerId,ownerId),
+   gte(scenarios.createdAt,Date.now()-3600000))).get()!.n;
+  if(total>=100||recent>=12)throw new DomainError("limit","Scenario creation quota reached");
+  const scenario=createScenario(ownerId,{role:input.role,jobDescription:input.jobDescription,focus:input.focus},{
+    cvText:input.cvText,cvFilename:input.cvFilename,planJson:"",modelId:""
+  });
+  return getScenario(ownerId,scenario.id);
+ }
+ return withAiBudget(ownerId,{"action":"create","payload":input},async()=>{
+  // Check before invoking billable AI; createScenario rechecks inside its transaction.
+  const total=db.select({n:count()}).from(scenarios).where(eq(scenarios.ownerId,ownerId)).get()!.n;
+  const recent=db.select({n:count()}).from(scenarios).where(and(eq(scenarios.ownerId,ownerId),
+   gte(scenarios.createdAt,Date.now()-3600000))).get()!.n;
+  if(total>=100||recent>=12)throw new DomainError("limit","Scenario creation quota reached");
+  const generated=await planScenario(ownerId,input.role,input.jobDescription,input.cvText,input.focus);
+  const scenario=createScenario(ownerId,{role:input.role,jobDescription:input.jobDescription,focus:input.focus},{
+    cvText:input.cvText,cvFilename:input.cvFilename,planJson:JSON.stringify(generated.output),modelId:generated.modelId
+  });
+  return getScenario(ownerId,scenario.id);
  });
- return getScenario(ownerId,scenario.id); });
-
 }
 export async function reviseLiveScenario(ownerId:string,id:string,payload:unknown){
  const input=instruction.parse(payload);
@@ -61,8 +72,84 @@ return withAiBudget(ownerId,{"action":"revise","scenarioId":id,"revision":input.
 }
 export function currentPlan(ownerId:string,id:string){
  const scenario=getScenario(ownerId,id);
- const planned=planFor(id,scenario.latestRevision);
- return {scenario,plan:planned.plan,modelId:planned.row.modelId,cvFilename:planned.row.cvFilename};
+ const row=db.select().from(scenarioPlans).where(and(eq(scenarioPlans.scenarioId,id),eq(scenarioPlans.revision,scenario.latestRevision))).get();
+ if(!row||!row.planJson){
+  return {scenario,plan:null,modelId:row?.modelId||null,cvFilename:row?.cvFilename||"",cvText:row?.cvText||""};
+ }
+ let plan:z.infer<typeof planSchema>|null=null;
+ try{plan=planSchema.parse(JSON.parse(row.planJson));}catch{}
+ return {scenario,plan,modelId:row.modelId,cvFilename:row.cvFilename,cvText:row.cvText};
+}
+
+const updateLiveInput=z.object({
+  role:z.string().trim().min(3).max(180).optional(),
+  jobDescription:z.string().trim().min(10).max(20000).optional(),
+  focus:z.string().trim().max(1500).optional(),
+  cvText:z.string().trim().min(15).max(30000).optional(),
+  cvFilename:z.string().trim().max(180).optional(),
+});
+export async function updateLiveScenario(ownerId:string,id:string,payload:unknown){
+ const data=updateLiveInput.parse(payload);
+ const scenario=getScenario(ownerId,id);
+ db.transaction((tx)=>{
+  const toUpdate:Partial<typeof scenarios.$inferInsert>={};
+  if(data.role!==undefined)toUpdate.role=data.role;
+  if(data.jobDescription!==undefined)toUpdate.jobDescription=data.jobDescription;
+  if(data.focus!==undefined)toUpdate.focus=data.focus;
+  if(Object.keys(toUpdate).length>0){
+   tx.update(scenarios).set(toUpdate).where(eq(scenarios.id,id)).run();
+  }
+  if(data.cvText!==undefined||data.cvFilename!==undefined){
+   const existingPlan=tx.select().from(scenarioPlans)
+    .where(and(eq(scenarioPlans.scenarioId,id),eq(scenarioPlans.revision,scenario.latestRevision))).get();
+   if(existingPlan){
+    tx.update(scenarioPlans).set({
+     ...(data.cvText!==undefined?{cvText:data.cvText}:{}),
+     ...(data.cvFilename!==undefined?{cvFilename:data.cvFilename}:{}),
+    }).where(and(eq(scenarioPlans.scenarioId,id),eq(scenarioPlans.revision,scenario.latestRevision))).run();
+   }else if(data.cvText){
+    tx.insert(scenarioPlans).values({
+     scenarioId:id,revision:scenario.latestRevision,
+     cvText:data.cvText,cvFilename:data.cvFilename||"pasted-cv.txt",
+     planJson:"",modelId:"",createdAt:Date.now()
+    }).run();
+   }
+  }
+ });
+ return currentPlan(ownerId,id);
+}
+
+export async function planLiveScenario(ownerId:string,id:string,providedCvText?:string,instruction?:string){
+ const scenario=getScenario(ownerId,id);
+ const existingPlan=db.select().from(scenarioPlans)
+  .where(and(eq(scenarioPlans.scenarioId,id),eq(scenarioPlans.revision,scenario.latestRevision))).get();
+ const cvText=providedCvText?.trim() || existingPlan?.cvText?.trim() || "No candidate CV provided; assess candidate based strictly on role requirements and job description.";
+ const cvFilename=existingPlan?.cvFilename||"pasted-cv.txt";
+ const focus=[scenario.focus, instruction?.trim()].filter(Boolean).join(". Instruction: ");
+
+ return withAiBudget(ownerId,{"action":"plan","scenarioId":id,"revision":scenario.latestRevision,"role":scenario.role,"jd":scenario.jobDescription,"focus":focus,"cv":cvText},async()=>{
+  const generated=await planScenario(ownerId,scenario.role,scenario.jobDescription,cvText,focus);
+  db.transaction((tx)=>{
+   const planRow=tx.select().from(scenarioPlans)
+    .where(and(eq(scenarioPlans.scenarioId,id),eq(scenarioPlans.revision,scenario.latestRevision))).get();
+   if(planRow){
+    tx.update(scenarioPlans).set({
+     planJson:JSON.stringify(generated.output),
+     modelId:generated.modelId,
+     ...(providedCvText ? { cvText: providedCvText } : {})
+    }).where(and(eq(scenarioPlans.scenarioId,id),eq(scenarioPlans.revision,scenario.latestRevision))).run();
+   }else{
+    tx.insert(scenarioPlans).values({
+     scenarioId:id,revision:scenario.latestRevision,
+     cvText,cvFilename,
+     planJson:JSON.stringify(generated.output),
+     modelId:generated.modelId,
+     createdAt:Date.now()
+    }).run();
+   }
+  });
+  return currentPlan(ownerId,id);
+ });
 }
 export function startLive(ownerId:string,input:unknown) {
  assertReady(ownerId);

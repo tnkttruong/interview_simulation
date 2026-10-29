@@ -10,7 +10,9 @@ test("P1-P3: AI plan, revision approval, typed live interview, hint and deletion
  await expect(page.getByTestId("live-workspace")).toHaveAttribute("data-hydrated","true");
  await page.getByLabel("Job description").fill("Build resilient data services, respond to database incidents and mentor engineers");
  await page.getByLabel("Or paste/edit CV text").fill("I worked on Node.js services, PostgreSQL reliability and on-call response.");
- await page.getByRole("button",{name:"Generate AI interview scenario"}).click();
+ await page.getByRole("button",{name:/Create interview scenario|Generate AI interview scenario/}).click();
+ await expect(page.getByRole("button",{name:/Update/})).toBeVisible();
+ await page.getByRole("button",{name:/start planning review metting script/i}).click();
  await expect(page.getByText("Focus on production ownership and reliability.")).toBeVisible();
  await page.getByLabel("Revision request").fill("Focus more on real database incidents");
  await page.getByRole("button",{name:"Revise with AI"}).click();

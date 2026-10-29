@@ -17,6 +17,9 @@ function restrictedEnv():NodeJS.ProcessEnv {
  const keys=["PATH","HOME","USER","TMPDIR","LANG","LC_ALL","XDG_CONFIG_HOME","XDG_CACHE_HOME","CODEX_HOME","SystemRoot","APPDATA","LOCALAPPDATA"];
  const env:NodeJS.ProcessEnv={NODE_ENV:process.env.NODE_ENV};
  for(const key of keys)if(process.env[key])env[key]=process.env[key];
+ const home = process.env.HOME || "";
+ const extra = [home ? `${home}/.local/bin` : "", "/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin"].filter(Boolean).join(":");
+ env.PATH = env.PATH ? `${env.PATH}:${extra}` : extra;
  return env;
 }
 function execAsync(cmd:string,args:string[],timeout:number,maxBuffer:number){
@@ -96,9 +99,26 @@ function parseResponse(provider:CliProvider,stdout:string):string {
   let answer="";
   for(const line of stdout.split(/\r?\n/)){
    try{
-    const event=JSON.parse(line) as {type?:string,item?:{type?:string,text?:string}};
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const event=JSON.parse(line) as Record<string, any>;
     if(event.type==="item.completed"&&event.item?.type==="agent_message")answer=event.item.text||answer;
+    else if(event.type==="item.completed"&&event.item?.type==="message")answer=event.item.text||event.item.content?.[0]?.text||answer;
+    else if(event.type==="agent_message")answer=event.text||event.message||answer;
+    else if(event.item?.type==="agent_message"&&event.item?.text)answer=event.item.text||answer;
+    else if(event.type==="response.completed"&&event.response?.output) {
+      for(const out of event.response.output) {
+        if(out.content) for(const c of out.content) if(c.text) answer=c.text;
+      }
+    }
    }catch{/* ignore non-JSON diagnostics */}
+  }
+  if(!answer && stdout.trim()) {
+    const trimmed = stdout.trim();
+    if(trimmed.startsWith("{") && trimmed.endsWith("}")) answer = trimmed;
+    else {
+      const match = trimmed.match(/\{[\s\S]*\}/);
+      if(match) answer = match[0];
+    }
   }
   return answer.trim();
  }
@@ -110,6 +130,14 @@ function parseResponse(provider:CliProvider,stdout:string):string {
     response=event.result.structured_output?JSON.stringify(event.result.structured_output):event.result.response||"";
    }
   }catch{/* ignore non-JSON diagnostics */}
+ }
+ if(!response && stdout.trim()) {
+   const trimmed = stdout.trim();
+   if(trimmed.startsWith("{") && trimmed.endsWith("}")) response = trimmed;
+   else {
+     const match = trimmed.match(/\{[\s\S]*\}/);
+     if(match) response = match[0];
+   }
  }
  return response.trim();
 }
@@ -137,14 +165,17 @@ export async function runCli(provider:CliProvider,model:string,prompt:string):Pr
    child.on("close",code=>{
     if(finished)return;finished=true;clearTimeout(timer);
     if(expired||code!==0||Buffer.byteLength(stdout)>limit){
-     // Operators get redacted diagnostics; clients only get a generic (or auth-hint) message.
      console.warn(JSON.stringify({event:"ai_cli_failed",provider,code,expired,stderr:redact(stderrHead).slice(0,1000)}));
      if(!expired&&authPattern.test(stderrHead))
       return reject(new DomainError("invalid","AI CLI appears not signed in on the server; sign in to the CLI and retry"));
-     return reject(new DomainError("invalid","AI CLI invocation failed or timed out"));
+     const cleanErr = stderrHead.split("\n").filter(l => l.trim() && !l.includes("WARNING:")).join(" ").trim();
+     return reject(new DomainError("invalid", cleanErr ? `AI CLI error: ${cleanErr.slice(0, 300)}` : "AI CLI invocation failed or timed out"));
     }
     const answer=parseResponse(provider,stdout);
-    if(!answer)return reject(new DomainError("invalid","AI CLI produced no structured reply"));
+    if(!answer){
+     console.warn(JSON.stringify({event:"ai_cli_no_reply",provider,stdout:stdout.slice(0, 1000)}));
+     return reject(new DomainError("invalid","AI CLI produced no structured reply"));
+    }
     resolve(answer);
    });
    const payload=provider==="codex_cli"?prompt:JSON.stringify({event:"user",message:{content:prompt}})+"\n";

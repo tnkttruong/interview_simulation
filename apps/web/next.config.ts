@@ -7,6 +7,6 @@ const config: NextConfig = {
   output: "standalone",
   outputFileTracingRoot: resolve(process.cwd(), "../.."),
   transpilePackages: ["@interview/core"],
-  serverExternalPackages: ["better-sqlite3"],
+  serverExternalPackages: ["better-sqlite3", "better-auth"],
 };
 export default config;
