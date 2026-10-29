@@ -47,6 +47,65 @@ export async function listen(locale:string,credential:SpeechCredential){
    },(error:string)=>reject(new Error(String(error)))));
  }finally{recog.close();}
 }
+export interface ContinuousListener{
+ stop:()=>Promise<string>;
+}
+export async function startContinuousListening(
+ locale:string,
+ credential:SpeechCredential,
+ callbacks:{
+  onRecognizing?:(interim:string)=>void;
+  onRecognized?:(accumulated:string)=>void;
+  onError?:(err:Error)=>void;
+ }
+):Promise<ContinuousListener>{
+ const sdk=await loadAzureSdk();
+ const cfg=sdk.SpeechConfig.fromAuthorizationToken(credential.token,credential.region);
+ cfg.speechRecognitionLanguage=locale;
+ const mic=sdk.AudioConfig.fromDefaultMicrophoneInput();
+ const recog=new sdk.SpeechRecognizer(cfg,mic);
+ let accumulated="";
+ let stopped=false;
+ recog.recognizing=(_s:SDK,e:{result?:{text?:string}})=>{
+  if(e.result?.text)callbacks.onRecognizing?.(e.result.text);
+ };
+ recog.recognized=(_s:SDK,e:{result?:{reason:number,text?:string}})=>{
+  const res=e.result;
+  if(res&&res.reason===sdk.ResultReason.RecognizedSpeech&&res.text?.trim()){
+   const sentence=res.text.trim();
+   accumulated=accumulated?`${accumulated} ${sentence}`:sentence;
+   callbacks.onRecognized?.(accumulated);
+  }
+ };
+ recog.canceled=(_s:SDK,e:{reason:number,errorDetails?:string})=>{
+  if(e.reason===sdk.CancellationReason?.Error){
+   callbacks.onError?.(new Error(e.errorDetails||"Speech recognition canceled"));
+  }
+ };
+ await new Promise<void>((resolve,reject)=>{
+  recog.startContinuousRecognitionAsync(
+   ()=>resolve(),
+   (err:string)=>reject(new Error(String(err)))
+  );
+ });
+ return {
+  stop:async()=>{
+   if(stopped)return accumulated;
+   stopped=true;
+   try{
+    await new Promise<void>((resolve)=>{
+     recog.stopContinuousRecognitionAsync(
+      ()=>resolve(),
+      ()=>resolve()
+     );
+    });
+   }finally{
+    recog.close();
+   }
+   return accumulated;
+  }
+ };
+}
 export async function checkMicrophone(){
  if(!navigator.mediaDevices?.getUserMedia)throw new Error("Microphone unavailable; use HTTPS and a supported browser");
  const stream=await navigator.mediaDevices.getUserMedia({audio:true});

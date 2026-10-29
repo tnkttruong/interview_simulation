@@ -1,16 +1,17 @@
 "use client";
-import {useEffect,useRef,useState} from "react";
+import {useCallback,useEffect,useRef,useState} from "react";
 import Link from "next/link";
 import {voiceByLocale} from "@interview/core";
-import {listen,say,type SpeechCredential} from "./azure-client";
+import {checkMicrophone,checkSpeaker,say,startContinuousListening,type ContinuousListener,type SpeechCredential} from "./azure-client";
 import {extractPdf} from "./pdf-client";
 type Locale=keyof typeof voiceByLocale;
+const VALID_STEPS=["prepare","review","preflight","meeting","results"] as const;
+type Step=typeof VALID_STEPS[number];
 type Plan={role:string;level:string;overview:string;stages:{topic:string;questions:string[];suggestedAnswers?:string[]}[];rubric:{competency:string;criteria:string}[]};
 type Scenario={id:string;role:string;jobDescription:string;focus:string;latestRevision:number;revisions:{revision:number;approvedAt:number|null;notes:string}[]};
 type Turn={id:string;sequence:number;question:string;answer:string;answerSource:string;originalStt:string|null};
-type Session={id:string;mode:string;state:string;version:number;nextQuestion:string|null;nextQuestionId:string|null;
-  nextSuggestedAnswer:string|null;
-  turns:Turn[];speechConfig:string};
+type Session={id:string;scenarioId?:string;mode:string;state:string;version:number;nextQuestion:string|null;nextQuestionId:string|null;
+  nextSuggestedAnswer?:string|null;turns:Turn[];speechConfig:string};
 type Catalog={enabled:boolean;voices:Record<string,string[]>};
 const locales:{key:Locale,label:string}[]=[
  {key:"en-US",label:"English (US)"},{key:"en-GB",label:"English (UK)"},{key:"vi-VN",label:"Tiếng Việt"}
@@ -22,17 +23,45 @@ async function api<T>(url:string,init?:RequestInit):Promise<T>{
  return data;
 }
 export default function LiveWorkspace({email}:{email:string}){
- const [step,setStep]=useState<"setup"|"meeting"|"results">("setup");
+ const [step,setStep]=useState<Step>("prepare");
+
+ const changeStep=useCallback((next:Step,replace:boolean=false,scenarioIdOverride?:string,sessionIdOverride?:string)=>{
+  setStep(next);
+  if(typeof window!=="undefined"){
+   const url=new URL(window.location.href);
+   url.searchParams.set("step",next);
+   const scId=scenarioIdOverride!==undefined?scenarioIdOverride:scenarioRef.current?.id;
+   if(scId){
+    url.searchParams.set("scenarioId",scId);
+   }
+   const sessId=sessionIdOverride!==undefined?sessionIdOverride:sessionRef.current?.id;
+   if(sessId&&(next==="meeting"||next==="results")){
+    url.searchParams.set("sessionId",sessId);
+   }else if(next==="prepare"||next==="review"||next==="preflight"){
+    url.searchParams.delete("sessionId");
+   }
+   const targetUrl=url.pathname+(url.search?url.search:"");
+   if(replace){
+    window.history.replaceState({step:next},"",targetUrl);
+   }else{
+    window.history.pushState({step:next},"",targetUrl);
+   }
+  }
+ },[]);
  const [hydrated,setHydrated]=useState(false);
- const [role,setRole]=useState(""),[jd,setJd]=useState("");
+ const [role,setRole]=useState("Senior Backend Engineer"),[jd,setJd]=useState("");
  const [focus,setFocus]=useState(""),[cvText,setCvText]=useState(""),[cvName,setCvName]=useState("pasted-cv.txt");
  const [scenario,setScenario]=useState<Scenario|null>(null),[plan,setPlan]=useState<Plan|null>(null);
  const [feedback,setFeedback]=useState(""),[candidateLocale,setCandidateLocale]=useState<Locale>("en-US");
+ const [isEditing,setIsEditing]=useState(false);
+ const [editRole,setEditRole]=useState(""),[editJd,setEditJd]=useState("");
+ const [editFocus,setEditFocus]=useState(""),[editCvText,setEditCvText]=useState("");
  const [interviewerLocale,setInterviewerLocale]=useState<Locale>("en-US");
  const [voice,setVoice]=useState<string>(voiceByLocale["en-US"][0]),[catalog,setCatalog]=useState<Catalog|null>(null);
- const [consent,setConsent]=useState(false),[voiceMode,setVoiceMode]=useState<"auto"|"typed"|"voice">("auto");
- const [session,setSession]=useState<Session|null>(null);
- const [generatedKey,setGeneratedKey]=useState<string|null>(null);
+ const [consent,setConsent]=useState(false),[textOnly,setTextOnly]=useState(false),[micOk,setMicOk]=useState(false);
+ const [speakerOk,setSpeakerOk]=useState(false),[session,setSession]=useState<Session|null>(null);
+ const [isRecording,setIsRecording]=useState(false);
+ const [interimText,setInterimText]=useState("");
  const [answer,setAnswer]=useState(""),[recognized,setRecognized]=useState(""),[hint,setHint]=useState("");
  const [showSuggestedAnswer,setShowSuggestedAnswer]=useState(false);
  const [busy,setBusy]=useState(false),[message,setMessage]=useState(""),[error,setError]=useState("");
@@ -41,10 +70,32 @@ export default function LiveWorkspace({email}:{email:string}){
  const credential=useRef<{value:SpeechCredential;expires:number}|null>(null);
  const visibleVoices=catalog?.enabled?catalog.voices[interviewerLocale]||[]:[...voiceByLocale[interviewerLocale]];
  const approved=!!scenario?.revisions.find(x=>x.revision===scenario.latestRevision)?.approvedAt;
- const inputKey=JSON.stringify({role,jd,focus,cvText,cvName});
- const planCurrent=!!scenario&&!!plan&&generatedKey===inputKey;
- const questionCount=plan?.stages.reduce((total,stage)=>total+stage.questions.length,0)??0;
- const textOnly=voiceMode==="typed"||(voiceMode==="auto"&&(!catalog?.enabled||!visibleVoices.includes(voice)));
+
+ const scenarioRef=useRef<Scenario|null>(scenario);
+ scenarioRef.current=scenario;
+ const sessionRef=useRef<Session|null>(session);
+ sessionRef.current=session;
+ const preparingQuestionRef=useRef(false);
+ const lastSpokenQuestionIdRef=useRef<string|null>(null);
+ const isRecordingRef=useRef(false);
+ const listenerRef=useRef<ContinuousListener|null>(null);
+
+ useEffect(()=>{
+  if(step==="meeting"&&!micOk&&!textOnly&&typeof window!=="undefined"){
+   checkMicrophone().then(()=>{
+    setMicOk(true);
+   }).catch(e=>{
+    console.warn("Microphone permission not granted yet:", e);
+   });
+  }
+ },[step,micOk,textOnly]);
+
+ useEffect(()=>{
+  if(typeof window!=="undefined"&&scenario?.id){
+   sessionStorage.setItem("last_scenario_id",scenario.id);
+  }
+ },[scenario]);
+
  useEffect(()=>{
   fetch("/api/me/ai-settings",{cache:"no-store"}).then(x=>x.json()).then((d:{settings?:{interviewerLocale:Locale;candidateSttLocale:Locale;voiceId:string}})=>{
    if(d.settings){setInterviewerLocale(d.settings.interviewerLocale);setCandidateLocale(d.settings.candidateSttLocale);setVoice(d.settings.voiceId);}
@@ -56,40 +107,169 @@ export default function LiveWorkspace({email}:{email:string}){
    if(d.items)setHistory(d.items.filter((s:{mode?:string})=>s.mode==="live"));
   }).catch(()=>{});
  },[]);
+
+ const loadPlan=useCallback(async(id:string)=>{
+  const details=await api<{scenario:Scenario;plan:Plan|null;cvFilename?:string;cvText?:string}>("/api/live/scenarios/"+id);
+  setScenario(details.scenario);scenarioRef.current=details.scenario;setPlan(details.plan);
+  if(details.cvText)setCvText(details.cvText);
+  if(details.cvFilename)setCvName(details.cvFilename);
+  setEditRole(details.scenario.role);
+  setEditJd(details.scenario.jobDescription);
+  setEditFocus(details.scenario.focus);
+  setEditCvText(details.cvText||"");
+ },[]);
+
+ const loadSessionById=useCallback(async(id:string)=>{
+  const next=await api<Session>("/api/demo/sessions/"+id);
+  setSession(next);
+  sessionRef.current=next;
+  try{
+   const config=JSON.parse(next.speechConfig);
+   if(config.interviewerLocale)setInterviewerLocale(config.interviewerLocale);
+   if(config.candidateSttLocale)setCandidateLocale(config.candidateSttLocale);
+   if(config.interviewerVoiceId)setVoice(config.interviewerVoiceId);
+  }catch{}
+  if(next.scenarioId&&scenarioRef.current?.id!==next.scenarioId){
+   try{await loadPlan(next.scenarioId);}catch(e){console.error("Failed to load scenario plan:", e);}
+  }
+  return next;
+ },[loadPlan]);
+
+ useEffect(()=>{
+  const syncFromUrl=async ()=>{
+   const params=new URLSearchParams(window.location.search);
+   const s=params.get("step");
+   const sessId=params.get("sessionId");
+   let currentSession=sessionRef.current;
+   if(sessId&&currentSession?.id!==sessId){
+    try{
+     currentSession=await loadSessionById(sessId);
+     if(currentSession.state==="IN_PROGRESS"&&!currentSession.nextQuestion&&!preparingQuestionRef.current){
+      preparingQuestionRef.current=true;
+      try{
+       currentSession=await readQuestion(currentSession);
+      }catch(e){
+       console.error("Failed to prepare initial question:", e);
+      }finally{
+       preparingQuestionRef.current=false;
+      }
+     }
+     if(currentSession?.nextQuestion&&currentSession.nextQuestionId&&lastSpokenQuestionIdRef.current!==currentSession.nextQuestionId){
+      lastSpokenQuestionIdRef.current=currentSession.nextQuestionId;
+      void speak(currentSession,true);
+     }
+    }catch(e){
+     console.error("Failed to load session in live workspace:", e);
+    }
+   }
+
+   if(currentSession){
+    const targetStep=currentSession.state==="COMPLETED"?"results":"meeting";
+    setStep(targetStep);
+    if(typeof window!=="undefined"&&(s!==targetStep||!sessId)){
+     const url=new URL(window.location.href);
+     url.searchParams.set("step",targetStep);
+     url.searchParams.set("sessionId",currentSession.id);
+     if(currentSession.scenarioId)url.searchParams.set("scenarioId",currentSession.scenarioId);
+     window.history.replaceState({step:targetStep},"",url.pathname+(url.search?url.search:""));
+    }
+   }else{
+    let scId=params.get("scenarioId");
+    if(!scId&&typeof window!=="undefined"&&(s==="preflight"||s==="review")){
+     const stored=sessionStorage.getItem("last_scenario_id");
+     if(stored)scId=stored;
+    }
+    if(scId&&scenarioRef.current?.id!==scId){
+     try{
+      await loadPlan(scId);
+     }catch(e){
+      console.error("Failed to load scenario in live workspace:", e);
+     }
+    }
+    if(s&&(VALID_STEPS as readonly string[]).includes(s)){
+     if(s==="meeting"||s==="results"){
+      setStep("prepare");
+      const url=new URL(window.location.href);
+      url.searchParams.delete("step");
+      url.searchParams.delete("sessionId");
+      window.history.replaceState({step:"prepare"},"",url.pathname+(url.search?url.search:""));
+     }else{
+      setStep(s as Step);
+     }
+    }else{
+     setStep("prepare");
+    }
+   }
+  };
+  void syncFromUrl();
+  window.addEventListener("popstate",syncFromUrl);
+  return ()=>{
+   if(listenerRef.current){
+    void listenerRef.current.stop();
+    listenerRef.current=null;
+   }
+   window.removeEventListener("popstate",syncFromUrl);
+  };
+ },[loadPlan,loadSessionById]);
  async function run(fn:()=>Promise<void>){
   if(busy)return;setBusy(true);setError("");
   try{await fn();}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}
  }
- async function loadPlan(id:string){
-  const details=await api<{scenario:Scenario;plan:Plan}>("/api/live/scenarios/"+id);
-  setScenario(details.scenario);setPlan(details.plan);
- }
  function changeLanguage(next:Locale){
   setInterviewerLocale(next);
   setVoice((catalog?.enabled?catalog.voices[next]:undefined)?.[0]||voiceByLocale[next][0]);
+  setMicOk(false);
  }
- async function upload(file:File){
+ async function upload(file:File, target: "cv" | "jd" = "cv"){
   await run(async()=>{
-   if(file.size>4*1024*1024)throw new Error("CV limit is 4 MB");
+   if(file.size>4*1024*1024)throw new Error("File limit is 4 MB");
    let content:string;
    if(file.name.toLowerCase().endsWith(".pdf"))content=await extractPdf(file);
    else{
     const data=new FormData();data.append("file",file);
     const result=await fetch("/api/live/cv",{method:"POST",body:data,credentials:"same-origin"});
     const parsed=await result.json();
-    if(!result.ok)throw new Error(parsed.error||"CV extraction failed");
+    if(!result.ok)throw new Error(parsed.error||"File extraction failed");
     content=parsed.cvText;
    }
-   setCvText(content);setCvName(file.name);
-   setMessage("Extracted "+content.length+" characters from "+file.name+". Review the text before submitting.");
+   if(target==="cv"){
+    setCvText(content);setCvName(file.name);setEditCvText(content);
+    setMessage("Extracted "+content.length+" characters from "+file.name+" into CV. Review the text before submitting.");
+   }else{
+    setJd(content);setEditJd(content);
+    setMessage("Extracted "+content.length+" characters from "+file.name+" into Job Description. Review the text before submitting.");
+   }
   });
  }
  async function create(){
   await run(async()=>{
    const generated=await api<Scenario>("/api/live/scenarios",{method:"POST",
-    body:JSON.stringify({role:role.trim()||"Position specified in job description",jobDescription:jd,focus,cvText,cvFilename:cvName})});
-   await loadPlan(generated.id);setGeneratedKey(inputKey);setConsent(false);
-   setMessage("Interview script is ready. Review it below or start the meeting.");
+    body:JSON.stringify({role,jobDescription:jd,focus,cvText,cvFilename:cvName,planImmediately:false})});
+   await loadPlan(generated.id);setConsent(false);setIsEditing(false);changeStep("review");
+   setMessage("Scenario created! You can update details or start planning the interview review meeting script.");
+  });
+ }
+ async function saveScenarioUpdate(){
+  if(!scenario)return;
+  await run(async()=>{
+   const updated=await api<{scenario:Scenario;plan:Plan|null;cvFilename?:string;cvText?:string}>("/api/live/scenarios/"+scenario.id,{
+    method:"PATCH",
+    body:JSON.stringify({role:editRole,jobDescription:editJd,focus:editFocus,cvText:editCvText})
+   });
+   setScenario(updated.scenario);setPlan(updated.plan);
+   setRole(updated.scenario.role);setJd(updated.scenario.jobDescription);setFocus(updated.scenario.focus);
+   if(updated.cvText)setCvText(updated.cvText);
+   setIsEditing(false);
+   setMessage("Scenario updated successfully.");
+  });
+ }
+ async function startPlanningReviewScript(){
+  if(!scenario)return;
+  await run(async()=>{
+   setMessage("Calling AI to plan interview review meeting script...");
+   const updated=await api<{scenario:Scenario;plan:Plan}>("/api/live/scenarios/"+scenario.id+"/plan",{method:"POST"});
+   setScenario(updated.scenario);setPlan(updated.plan);
+   setMessage("Interview review meeting script planned successfully!");
   });
  }
  async function revise(){
@@ -97,20 +277,29 @@ export default function LiveWorkspace({email}:{email:string}){
   await run(async()=>{
    await api("/api/live/scenarios/"+scenario.id+"/revise",{method:"POST",body:JSON.stringify({feedback,expectedRevision:scenario.latestRevision})});
    await loadPlan(scenario.id);setFeedback("");setConsent(false);
-   setMessage("Interview script updated. You can start the meeting.");
+  });
+ }
+ async function approve(){
+  if(!scenario)return;
+  await run(async()=>{
+   const result=await api<Scenario>("/api/demo/scenarios/"+scenario.id,{
+    method:"PATCH",body:JSON.stringify({action:"approve",expectedRevision:scenario.latestRevision})});
+   setScenario(result);setConsent(false);setMicOk(false);setSpeakerOk(false);
+   changeStep("preflight");
   });
  }
  async function getCredential(){
   if(credential.current&&credential.current.expires>Date.now()+30000)return credential.current.value;
-  if(!session)throw new Error("Start a session to use speech");
+  const activeSession=sessionRef.current||session;
+  if(!activeSession)throw new Error("Start a session to use speech");
   const data=await api<{token:string;region:string;expiresIn:number}>("/api/live/speech/token",{
-   method:"POST",body:JSON.stringify({sessionId:session.id})});
+   method:"POST",body:JSON.stringify({sessionId:activeSession.id})});
   credential.current={value:{token:data.token,region:data.region},expires:Date.now()+data.expiresIn*1000};
   return credential.current.value;
  }
  async function readQuestion(s:Session){
   const next=await api<Session>("/api/live/sessions/"+s.id+"/question",{method:"POST"});
-  setSession(next);setHint("");setShowSuggestedAnswer(false);setRecognized("");setAnswer("");answerKey.current=null;
+  setSession(next);sessionRef.current=next;setHint("");setShowSuggestedAnswer(false);setRecognized("");setAnswer("");answerKey.current=null;
   return next;
  }
  async function previewSelectedVoice(){
@@ -132,41 +321,37 @@ export default function LiveWorkspace({email}:{email:string}){
   });
  }
  async function start(){
-  if(!scenario||!planCurrent||!consent)return;
+  if(!scenario||!approved||!consent)return;
   await run(async()=>{
-   if(voiceMode==="voice"&&!catalog?.enabled)throw new Error("Azure Speech is unavailable. Select automatic or typed mode.");
-   if(!textOnly&&!visibleVoices.includes(voice))throw new Error("Selected voice is unavailable in this Azure region");
-   // Approval is still recorded on the server, but no extra approval screen is needed.
-   if(!approved){
-    const updated=await api<Scenario>("/api/demo/scenarios/"+scenario.id,{
-     method:"PATCH",body:JSON.stringify({action:"approve",expectedRevision:scenario.latestRevision})});
-    setScenario(updated);
-   }
+   if(!textOnly&&(!micOk||!speakerOk))throw new Error("Test mic and speaker, or enable text-only fallback");
+   if(!textOnly&&catalog&&!catalog.enabled)throw new Error("Azure not configured; enable text-only fallback");
+   if(!visibleVoices.includes(voice))throw new Error("Selected voice unavailable in region");
    if(!startKey.current)startKey.current=crypto.randomUUID();
-   const started=await api<Session>("/api/live/sessions",{method:"POST",body:JSON.stringify({
+   const s=await api<Session>("/api/live/sessions",{method:"POST",body:JSON.stringify({
     scenarioId:scenario.id,revision:scenario.latestRevision,requestKey:startKey.current,
     speech:{interviewerLocale,interviewerVoiceId:voice,candidateSttLocale:candidateLocale,consentToTranscript:true}
    })});
-   setSession(started);setStep("meeting");startKey.current=null;credential.current=null;
-   setHistory(previous=>[{id:started.id,mode:started.mode,state:started.state,createdAt:Date.now()},
-    ...previous.filter(item=>item.id!==started.id)]);
-   const next=await readQuestion(started);
-   setMessage(next.nextQuestion?"Your AI interviewer is ready.":"Interview started. Select Generate question to retry.");
+   setSession(s);sessionRef.current=s;changeStep("meeting",false,scenario.id,s.id);startKey.current=null;credential.current=null;
+   const q=await readQuestion(s);
+   setMessage(q.nextQuestion?"AI interviewer is ready.":"Interview started. Generate the first question.");
+   if(q.nextQuestion&&q.nextQuestionId&&lastSpokenQuestionIdRef.current!==q.nextQuestionId){
+    lastSpokenQuestionIdRef.current=q.nextQuestionId;
+    void speak(q,true);
+   }
   });
  }
  async function refreshSession(id:string){
   const next=await api<Session>("/api/demo/sessions/"+id);
-  setSession(next);
+  setSession(next);sessionRef.current=next;
   return next;
  }
  async function continueSession(id:string){
   await run(async()=>{
    const selected=await refreshSession(id);
-   setShowSuggestedAnswer(false);setHint("");
    const config=JSON.parse(selected.speechConfig);
    setInterviewerLocale(config.interviewerLocale);setCandidateLocale(config.candidateSttLocale);
-   setVoice(config.interviewerVoiceId);setVoiceMode("typed");
-   setStep(selected.state==="COMPLETED"?"results":"meeting");
+   setVoice(config.interviewerVoiceId);
+   changeStep(selected.state==="COMPLETED"?"results":"meeting",false,selected.scenarioId,selected.id);
   });
  }
  async function action(kind:"pause"|"resume"|"finish"){
@@ -174,24 +359,31 @@ export default function LiveWorkspace({email}:{email:string}){
   await run(async()=>{
    const next=await api<Session>("/api/demo/sessions/"+session.id,{method:"PATCH",
     body:JSON.stringify({action:kind,expectedVersion:session.version})});
-   setSession(next);setShowSuggestedAnswer(false);
-   setHistory(previous=>previous.map(item=>item.id===next.id?{...item,state:next.state}:item));
-   if(kind==="finish")setStep("results");
+   setSession(next);
+   if(kind==="finish")changeStep("results");
   });
  }
- async function submit(){
-  if(!session?.nextQuestionId||!answer.trim())return;
+ async function submit(overrideAnswer?:string){
+  const textToSubmit=(typeof overrideAnswer==="string"?overrideAnswer:answer).trim();
+  if(!session?.nextQuestionId||!textToSubmit)return;
   await run(async()=>{
    if(!answerKey.current)answerKey.current=crypto.randomUUID();
    const body={clientTurnId:answerKey.current,expectedTurnSequence:session.turns.length+1,
-    expectedQuestionId:session.nextQuestionId,answer:answer.trim(),
-    source:recognized?(answer.trim()===recognized?"client_stt":"corrected"):"typed",
+    expectedQuestionId:session.nextQuestionId,answer:textToSubmit,
+    source:recognized?(textToSubmit===recognized?"client_stt":"corrected"):"typed",
     ...(recognized?{originalStt:recognized}:{})};
    try{
     const updated=await api<Session>("/api/demo/sessions/"+session.id+"/turns",{method:"POST",body:JSON.stringify(body)});
-    setSession(updated);answerKey.current=null;setHint("");setShowSuggestedAnswer(false);setAnswer("");setRecognized("");
-    if(updated.turns.length<15)await readQuestion(updated);
-    else setMessage("15-turn limit reached; finish to review the transcript.");
+    setSession(updated);sessionRef.current=updated;answerKey.current=null;setHint("");setShowSuggestedAnswer(false);setAnswer("");setRecognized("");setInterimText("");
+    if(updated.turns.length<15){
+     const nextQ=await readQuestion(updated);
+     if(nextQ.nextQuestion&&nextQ.nextQuestionId&&lastSpokenQuestionIdRef.current!==nextQ.nextQuestionId){
+      lastSpokenQuestionIdRef.current=nextQ.nextQuestionId;
+      void speak(nextQ,true,true);
+     }
+    }else{
+     setMessage("15-turn limit reached; finish to review the transcript.");
+    }
    }catch(e){
     const latest=await refreshSession(session.id);
     if(latest.turns.length>=session.turns.length+1){setAnswer("");answerKey.current=null;}
@@ -206,241 +398,318 @@ export default function LiveWorkspace({email}:{email:string}){
    setHint(result.hint);
   });
  }
- async function speak(){
-  if(!session?.nextQuestion)return;
-  await run(async()=>{
-   if(textOnly)throw new Error("Text-only mode active");
-   const config=JSON.parse(session.speechConfig);
-   await say(session.nextQuestion!,config.interviewerVoiceId,await getCredential());
-   setMessage("Interviewer finished speaking. You can answer now.");
-  });
+ async function speak(targetSession?:Session,silentError=false,autoListenAfter=true){
+  const current=targetSession||sessionRef.current||session;
+  if(!current?.nextQuestion)return;
+  if(textOnly)return;
+  try{
+   const config=JSON.parse(current.speechConfig);
+   const cred=await getCredential();
+   await say(current.nextQuestion,config.interviewerVoiceId,cred);
+   setMessage("Interviewer finished speaking. Bạn có thể trả lời bây giờ.");
+   if(autoListenAfter && current.state==="IN_PROGRESS" && current.nextQuestionId){
+    void startListening();
+   }
+  }catch(err){
+   if(silentError){
+    console.warn("Auto TTS speech could not play (browser may require click):", err);
+    setMessage("Interviewer question ready. Click '▶ Speak question' để nghe câu hỏi hoặc '🎙 Speak answer' để trả lời.");
+   }else{
+    setError(err instanceof Error?err.message:String(err));
+   }
+  }
  }
- async function record(){
-  if(!session)return;
-  await run(async()=>{
-   if(textOnly)throw new Error("Text-only mode active");
-   const config=JSON.parse(session.speechConfig);
-   const transcript=await listen(config.candidateSttLocale,await getCredential());
-   setRecognized(transcript);setAnswer(transcript);
-   setMessage("Speech recognized on this device. Edit the text before confirming if needed.");
-  });
+ async function startListening(){
+  const activeSession=sessionRef.current||session;
+  if(!activeSession||activeSession.state!=="IN_PROGRESS"||!activeSession.nextQuestionId)return;
+  if(textOnly||isRecordingRef.current)return;
+  if(listenerRef.current){
+   try{await listenerRef.current.stop();}catch{}
+   listenerRef.current=null;
+  }
+  isRecordingRef.current=true;
+  setIsRecording(true);
+  setMessage("🎙️ Micro đang mở liên tục: Bạn hãy nói câu trả lời. Khi nói xong hãy bấm 'End talk & Submit' hoặc 'End talk'.");
+  try{
+   const config=JSON.parse(activeSession.speechConfig);
+   const listener=await startContinuousListening(
+    config.candidateSttLocale,
+    await getCredential(),
+    {
+     onRecognizing:(partial)=>{
+      setInterimText(partial);
+     },
+     onRecognized:(accumulated)=>{
+      setRecognized(accumulated);
+      setAnswer(accumulated);
+      setInterimText("");
+     },
+     onError:(err)=>{
+      console.warn("Continuous recognition error:", err);
+     }
+    }
+   );
+   listenerRef.current=listener;
+  }catch(err){
+   isRecordingRef.current=false;
+   setIsRecording(false);
+   setError(err instanceof Error?err.message:String(err));
+  }
  }
- return <div className="live-simple-shell" data-testid="live-workspace" data-hydrated={hydrated?"true":"false"}>
-  <header className="live-simple-topbar">
-   <strong>◉ Interview Simulation</strong>
-   <nav aria-label="App navigation">
-    <Link href="/settings">AI Settings</Link>
-    <small>{email}</small>
-   </nav>
-  </header>
-  <main className="live-simple-main">
-   {step==="setup"&&<>
-    <div className="live-simple-heading">
-     <span className="eyebrow">AI MOCK INTERVIEW</span>
-     <h1>Practice a real interview with AI</h1>
-     <p className="lead">Add a job description and your CV, generate an interview script, then start the meeting.</p>
-    </div>
-   </>}
-   {step==="meeting"&&<div className="live-simple-heading">
-    <span className="eyebrow">LIVE MEETING</span>
-    <h1>Interview in progress</h1>
-   </div>}
-   {step==="results"&&<div className="live-simple-heading">
-    <span className="eyebrow">INTERVIEW COMPLETE</span>
-    <h1>Interview summary</h1>
-   </div>}
-   {error&&<div role="alert" className="alert error">{error}</div>}
-   {message&&<div role="status" className="alert info">{message}</div>}
-   {step==="setup"&&<>
-    <section className="panel live-form">
-     <h2>Job description & CV</h2>
-     <div className="live-inputs">
-      <label>Job description
-       <textarea rows={10} value={jd} maxLength={20000} placeholder="Paste the job description here..."
-        onChange={e=>setJd(e.target.value)}/>
-      </label>
-      <div className="live-cv-input">
-       <label>Upload CV (PDF, DOCX, TXT, MD; ≤4 MB)
-        <input type="file" accept=".pdf,.docx,.txt,.md" disabled={busy}
-         onChange={e=>{const file=e.target.files?.[0];if(file)void upload(file);}}/>
-       </label>
-       <p className="muted small">Or paste your CV below. You can edit the extracted text.</p>
-       <label>Or paste/edit CV text
-        <textarea rows={7} value={cvText} maxLength={30000} placeholder="Paste your experience, skills and projects..."
-         onChange={e=>{setCvText(e.target.value);setCvName("pasted-cv.txt");}}/>
-       </label>
-      </div>
-     </div>
-     <details className="live-details">
-      <summary>Optional: role and interview focus</summary>
-      <div className="live-extra-fields">
-       <label>Role (optional)<input value={role} maxLength={180} placeholder="AI will infer from JD"
-        onChange={e=>setRole(e.target.value)}/></label>
-       <label>Interview focus (optional)<input value={focus} maxLength={1500}
-        placeholder="Example: backend architecture and incident response" onChange={e=>setFocus(e.target.value)}/></label>
-      </div>
-     </details>
-     <div className="live-action-row">
-      <button className="btn primary" disabled={busy||jd.trim().length<10||cvText.trim().length<15}
-       onClick={create}>{busy?"Working...":"Generate AI interview scenario"}</button>
-      <span className="muted small">JD and CV are stored on this server when you generate a script.</span>
-     </div>
-    </section>
-    {planCurrent&&plan&&<section className="panel live-script" data-testid="generated-script">
-     <div className="live-script-heading">
-      <div><span className="eyebrow">READY TO PRACTICE</span><h2>{plan.role} · {plan.level}</h2></div>
-      <span className="pill">{questionCount} planned questions</span>
-     </div>
-     <p>{plan.overview}</p>
-     <label className="check">
-      <input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/>
-      I explicitly consent to storing my CV, interview scenario and transcript on this server.
+ async function stopListening(submitAfter=false){
+  if(!listenerRef.current&&!isRecordingRef.current)return;
+  setIsRecording(false);
+  isRecordingRef.current=false;
+  try{
+   let finalText="";
+   if(listenerRef.current){
+    finalText=await listenerRef.current.stop();
+    listenerRef.current=null;
+   }
+   const textToUse=(finalText||answer||interimText).trim();
+   setInterimText("");
+   if(textToUse){
+    setRecognized(textToUse);
+    setAnswer(textToUse);
+    setMessage("✓ Đã hoàn tất thu âm câu trả lời.");
+    if(submitAfter){
+     await submit(textToUse);
+    }
+   }else{
+    setMessage("Chưa phát hiện giọng nói. Bạn có thể bấm '🎙 Speak answer' để nói lại hoặc gõ văn bản.");
+   }
+  }catch(err){
+   setError(err instanceof Error?err.message:String(err));
+  }
+ }
+ return <div className="shell" data-testid="live-workspace" data-hydrated={hydrated?"true":"false"}>
+  <aside className="sidebar"><div className="brand">◉ <strong>Interview Simulation</strong></div>
+   <div className="side-caption">AI LIVE · P1–P3</div>
+   <nav aria-label="Interview steps">
+    {(["prepare","review","preflight","meeting","results"] as const).map((x,i)=>
+     <button key={x} className={step===x?"active":""} onClick={()=>changeStep(x)}>{i+1}. {x}</button>)}
+    <Link href="/settings" style={{color:"white",padding:14}}>⚙ AI Settings</Link>
+    <Link href="/" style={{color:"white",padding:14}}>← Offline P0 demo</Link>
+   </nav><div className="sidebar-bottom">AI responses require your own model key. Azure speech requires your own Azure resource.</div>
+  </aside><div className="main-area">
+   <header className="topbar"><span className="eyebrow">LIVE AI MOCK INTERVIEW</span><small>{email}</small></header>
+   <main className="page"><h1>Practice a real interview with AI</h1>
+    <p className="lead">Scenario from your CV and job description → approval → multilingual voice or typed meeting → adaptive questions and private answer coaching.</p>
+    {error&&<div role="alert" className="alert error">{error}</div>}
+    {message&&<div role="status" className="alert info">{message}</div>}
+    {step==="prepare"&&<div className="cols"><section className="panel form-grid">
+     <h2>1. Job & CV</h2>
+     <label>Role<input value={role} maxLength={180} onChange={e=>setRole(e.target.value)}/></label>
+     <label>Upload Job description (PDF, DOCX, TXT, MD; ≤4 MB)
+      <input type="file" accept=".pdf,.docx,.txt,.md" disabled={busy} onChange={e=>{const file=e.target.files?.[0];if(file)void upload(file,"jd");}}/>
      </label>
-     <div className="live-action-row">
-      <button className="btn primary live-main-cta" disabled={busy||!consent} onClick={start}>▶ Start AI meeting</button>
-      <span className="muted small">{textOnly?"Typed answers · no Azure setup required":"Voice enabled · microphone access requested when recording"}</span>
-     </div>
-     <details className="live-details">
-      <summary>View interview questions & suggested answers</summary>
-      {plan.stages.map((stage,i)=><div className="live-stage" key={i}>
-       <h3>{i+1}. {stage.topic}</h3>
-       <ol>{stage.questions.map((question,j)=><li key={j}>{question}
-        {stage.suggestedAnswers?.[j]&&<details className="live-answer-details">
-         <summary>Suggested answer</summary>
-         <p style={{whiteSpace:"pre-wrap"}}>{stage.suggestedAnswers[j]}</p>
-        </details>}</li>)}</ol>
-      </div>)}
-     </details>
-     <details className="live-details">
-      <summary>Refine script with AI (optional)</summary>
-      <div className="live-extra-fields">
-       <label>Revision request
-        <textarea rows={3} value={feedback} maxLength={1000}
-         placeholder="Example: Ask more architecture questions"
-         onChange={e=>setFeedback(e.target.value)}/>
-       </label>
-       <button className="btn secondary" onClick={revise} disabled={busy||feedback.trim().length<3}>Revise with AI</button>
-      </div>
-     </details>
-     <details className="live-details">
-      <summary>Meeting preferences (optional)</summary>
-      <div className="live-extra-fields">
-       <label>AI interviewer language
-        <select value={interviewerLocale} onChange={e=>changeLanguage(e.target.value as Locale)}>
-         {locales.map(locale=><option key={locale.key} value={locale.key}>{locale.label}</option>)}
-        </select>
-       </label>
-       <label>Answer input mode
-        <select value={voiceMode} onChange={e=>setVoiceMode(e.target.value as "auto"|"typed"|"voice")}>
-         <option value="auto">Automatic (voice when configured, otherwise typed)</option>
-         <option value="typed">Typed answers</option>
-         <option value="voice" disabled={!catalog?.enabled}>Azure microphone and voice</option>
-        </select>
-       </label>
-       {!textOnly&&<>
-        <label>AI interviewer voice<select value={voice} onChange={e=>setVoice(e.target.value)}>
-         {visibleVoices.map(name=><option key={name} value={name}>{name}</option>)}
-        </select></label>
-        <label>Your spoken input language<select value={candidateLocale}
-         onChange={e=>setCandidateLocale(e.target.value as Locale)}>
-         {locales.map(locale=><option key={locale.key} value={locale.key}>{locale.label}</option>)}
-        </select></label>
-        <button type="button" className="btn secondary" disabled={busy||!catalog?.enabled}
-         onClick={previewSelectedVoice}>▶ Preview voice</button>
-       </>}
-       <p className="muted small">{catalog?.enabled?"Azure Speech is configured.":"Azure Speech is not configured; typed answers work without microphone setup."}</p>
-      </div>
-     </details>
-    </section>}
-    {!!plan&&!planCurrent&&<div role="status" className="alert info">
-     Your JD or CV changed. Generate an updated script before starting.
-    </div>}
-    <details className="panel live-history">
-     <summary>Previous interviews ({history.filter(item=>item.mode==="live").length})</summary>
-     {history.filter(item=>item.mode==="live").length===0?<p className="muted">No previous sessions yet.</p>:
-      history.filter(item=>item.mode==="live").map(item=><button className="list-button" key={item.id}
-       disabled={busy} onClick={()=>continueSession(item.id)}>
-       {new Date(item.createdAt).toLocaleString()} · {item.state} →</button>)}
-    </details>
-   </>}
-   {step==="meeting"&&<section className="live-meeting">
-    <div className="live-meeting-heading">
-     <strong>Question {Math.min((session?.turns.length||0)+1,15)} / 15</strong>
-     <button className="btn danger" disabled={busy||!session||!["IN_PROGRESS","PAUSED","INTERRUPTED"].includes(session.state)}
-      onClick={()=>action("finish")}>Finish interview</button>
-    </div>
-    <div className="meeting-video">
-     <div className="avatar">👩🏻‍💼</div>
-     <strong>AI Interviewer · {session?.state}</strong>
-     <p>{session?.nextQuestion||"No active question. Resume or generate the next question."}</p>
-    </div>
-    <div className="live-meeting-tools">
-     {!session?.nextQuestion&&session?.state==="IN_PROGRESS"&&
-      <button className="btn secondary" disabled={busy} onClick={()=>session&&run(async()=>{await readQuestion(session);})}>
-       Generate question</button>}
-     {!textOnly&&session?.state==="IN_PROGRESS"&&<>
-      <button className="btn secondary" disabled={busy||!session?.nextQuestion} onClick={speak}>▶ Listen</button>
-      <button className="btn secondary" disabled={busy||!session?.nextQuestion} onClick={record}>🎙 Speak answer</button>
-     </>}
-     <button className="btn secondary" disabled={!session?.nextSuggestedAnswer||session?.state!=="IN_PROGRESS"}
-      aria-pressed={showSuggestedAnswer} onClick={()=>setShowSuggestedAnswer(value=>!value)}>
-      {showSuggestedAnswer?"Hide suggested answer":"Show suggested answer"}</button>
-     <button className="btn secondary" disabled={busy||!session?.nextQuestion||session?.state!=="IN_PROGRESS"}
-      onClick={hintForQuestion}>💡 Private hint</button>
-     <details className="live-controls-more">
-      <summary>More meeting controls</summary>
-      {session?.state==="IN_PROGRESS"?<button className="btn secondary" disabled={busy}
-       onClick={()=>action("pause")}>Pause</button>:
-       <button className="btn secondary" disabled={busy||!["PAUSED","INTERRUPTED"].includes(session?.state||"")}
-        onClick={()=>action("resume")}>Resume</button>}
-     </details>
-    </div>
-    {showSuggestedAnswer&&session?.nextSuggestedAnswer&&<div className="panel hint" data-testid="suggested-answer">
-     <h3>Suggested answer · practice reference</h3>
-     <p style={{whiteSpace:"pre-wrap"}}>{session.nextSuggestedAnswer}</p>
-     <p className="muted small">Use it as a guide, not a claim about your experience.</p>
-    </div>}
-    {hint&&<div className="panel hint"><h3>Private AI coaching hint</h3><p>{hint}</p></div>}
-    <div className="panel form-grid">
-     <label>Your answer (speech can be corrected before saving)
-      <textarea rows={5} value={answer} maxLength={12000}
-       placeholder="Type your answer or use the microphone..."
-       onChange={e=>{if(!busy){setAnswer(e.target.value);answerKey.current=null;}}}
-       disabled={busy||!session?.nextQuestionId||session?.state!=="IN_PROGRESS"}/>
+     <label>Job description<textarea rows={7} value={jd} maxLength={20000} onChange={e=>setJd(e.target.value)}/></label>
+     <label>Interview focus (optional)<input value={focus} maxLength={1500} onChange={e=>setFocus(e.target.value)}/></label>
+     <label>Upload CV (PDF, DOCX, TXT, MD; ≤4 MB)
+      <input type="file" accept=".pdf,.docx,.txt,.md" disabled={busy} onChange={e=>{const file=e.target.files?.[0];if(file)void upload(file);}}/>
      </label>
-     <button className="btn primary" onClick={submit}
-      disabled={busy||!answer.trim()||!session?.nextQuestionId||session?.state!=="IN_PROGRESS"}>
-      ✓ Commit answer & next question</button>
+     <label>Or paste/edit CV text<textarea rows={7} value={cvText} maxLength={30000}
+       onChange={e=>{setCvText(e.target.value);setCvName("pasted-cv.txt");}}/></label>
+     <button className="btn primary" disabled={busy||jd.trim().length<10||cvText.trim().length<15}
+      onClick={create}>Create interview scenario</button>
+    </section><section className="panel"><h2>Prior live sessions</h2>
+      {history.filter(x=>x.mode==="live").length===0?<p>No previous AI sessions.</p>:
+       history.filter(x=>x.mode==="live").map(s=><div key={s.id} style={{display:"flex",alignItems:"center",borderBottom:"1px solid #e9edf6"}}><button className="list-button" style={{flex:1,borderBottom:0}} disabled={busy}
+        onClick={()=>continueSession(s.id)}>{new Date(s.createdAt).toLocaleString()} · {s.state} →</button><Link href={`/sessions/${s.id}`} style={{padding:"0 15px",fontSize:"13px",color:"#555ddb",textDecoration:"none",whiteSpace:"nowrap"}}>Detail ↗</Link></div>)}
+     <p className="muted small">PDF text extraction happens in your browser. The extracted CV text is saved on this server for AI planning. Voice audio is processed by Azure but is not saved by this app.</p>
+    </section></div>}
+    {step==="review"&&<div className="cols"><section className="panel">
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px",flexWrap:"wrap",gap:"8px"}}>
+        <h2 style={{margin:0}}>2. Scenario details · revision {scenario?.latestRevision}</h2>
+        <div style={{display:"flex",gap:"8px",alignItems:"center"}}>
+          <span className="pill">{approved?"Approved":"Draft"} v{scenario?.latestRevision}</span>
+          {scenario&&<Link href={`/scenarios/${scenario.id}`} className="btn quiet small" style={{color:"#555ddb"}}>Open full page ↗</Link>}
+          {!isEditing&&scenario&&<button className="btn secondary" onClick={()=>{
+            setEditRole(scenario.role);
+            setEditJd(scenario.jobDescription);
+            setEditFocus(scenario.focus);
+            setEditCvText(cvText);
+            setIsEditing(true);
+          }} disabled={busy}>Update</button>}
+        </div>
+      </div>
+
+      {isEditing ? (
+        <div className="form-grid">
+          <h3>Edit scenario</h3>
+          <label>Role<input value={editRole} maxLength={180} onChange={e=>setEditRole(e.target.value)} disabled={busy}/></label>
+          <label>Tech stack / focus<input value={editFocus} maxLength={1500} onChange={e=>setEditFocus(e.target.value)} disabled={busy}/></label>
+          <label>Upload new Job description file (optional: PDF, DOCX, TXT, MD; ≤4 MB)
+            <input type="file" accept=".pdf,.docx,.txt,.md" disabled={busy} onChange={e=>{const file=e.target.files?.[0];if(file)void upload(file,"jd");}}/>
+          </label>
+          <label>Job description<textarea rows={6} value={editJd} maxLength={20000} onChange={e=>setEditJd(e.target.value)} disabled={busy}/></label>
+          <label>Upload new CV file (optional: PDF, DOCX, TXT, MD; ≤4 MB)
+            <input type="file" accept=".pdf,.docx,.txt,.md" disabled={busy} onChange={e=>{const file=e.target.files?.[0];if(file)void upload(file,"cv");}}/>
+          </label>
+          <label>CV text<textarea rows={6} value={editCvText} maxLength={30000} onChange={e=>setEditCvText(e.target.value)} disabled={busy}/></label>
+          <div style={{display:"flex",gap:"8px"}}>
+            <button className="btn primary" onClick={saveScenarioUpdate} disabled={busy||editRole.trim().length<3||editJd.trim().length<10||editCvText.trim().length<15}>
+              Save update
+            </button>
+            <button className="btn secondary" onClick={()=>setIsEditing(false)} disabled={busy}>Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {!scenario ? <p>Generate or select a scenario first.</p> : (
+            <div style={{display:"grid",gap:"12px",marginBottom:"20px"}}>
+              <div>
+                <small className="muted">Role</small>
+                <h3 style={{margin:"2px 0 4px"}}>{scenario.role}</h3>
+              </div>
+              {scenario.focus&&<div>
+                <small className="muted">Tech stack / focus</small>
+                <p style={{margin:"2px 0"}}>{scenario.focus}</p>
+              </div>}
+              <div>
+                <small className="muted">Job description</small>
+                <p style={{margin:"4px 0",whiteSpace:"pre-wrap",background:"#f8fafc",padding:"12px",borderRadius:"8px",border:"1px solid #e2e8f0",fontSize:"14px"}}>
+                  {scenario.jobDescription}
+                </p>
+              </div>
+              <div>
+                <small className="muted">CV text ({cvName})</small>
+                <p style={{margin:"4px 0",maxHeight:"120px",overflowY:"auto",whiteSpace:"pre-wrap",background:"#f8fafc",padding:"10px",borderRadius:"8px",border:"1px solid #e2e8f0",fontSize:"13px"}}>
+                  {cvText || "No CV text available"}
+                </p>
+              </div>
+              <div style={{marginTop:"8px"}}>
+                <button className="btn primary" onClick={startPlanningReviewScript} disabled={busy}>
+                  start planning review metting script
+                </button>
+              </div>
+            </div>
+          )}
+
+          <hr style={{margin:"24px 0",border:"0",borderTop:"1px solid #e2e8f0"}}/>
+
+          <h2>Meeting script & review plan</h2>
+          {!plan ? (
+            <div style={{padding:"18px",background:"#f0f7ff",borderRadius:"10px",border:"1px dashed #b8d2f2"}}>
+              <p style={{margin:0,color:"#355d8d"}}>
+                Script is not planned yet. Click <b>start planning review metting script</b> above to start calling AI to generate the interview questions and rubric.
+              </p>
+            </div>
+          ) : (
+            <>
+              <h3>{plan.role} · {plan.level}</h3><p>{plan.overview}</p>
+              {plan.stages.map((s,i)=><div key={i}><h3>{i+1}. {s.topic}</h3>
+                <ol>{s.questions.map((q,j)=><li key={j}>{q}{s.suggestedAnswers?.[j]&&<details><summary>Suggested answer</summary><p>{s.suggestedAnswers[j]}</p></details>}</li>)}</ol></div>)}
+              <h3>Evaluation rubric</h3><ul>{plan.rubric.map((rub,i)=><li key={i}><b>{rub.competency}:</b> {rub.criteria}</li>)}</ul>
+              <button className="btn primary" onClick={approve} disabled={busy||!scenario}>Approve this revision →</button>
+            </>
+          )}
+        </>
+      )}
+     </section><section className="panel form-grid"><h2>Ask planner to revise</h2>
+       <p>Revisions create a new unapproved version; previously approved versions remain immutable.</p>
+       <textarea aria-label="Revision request" rows={5} value={feedback} maxLength={1000}
+        placeholder="e.g. Focus more on system design and database incidents..."
+        onChange={e=>setFeedback(e.target.value)} disabled={busy||!plan}/>
+       <button className="btn secondary" onClick={revise} disabled={busy||!scenario||!plan||feedback.trim().length<3}>Revise with AI</button>
+      </section></div>}
+    {step==="preflight"&&<div className="cols"><section className="panel form-grid">
+      <h2>3. Meeting preflight</h2>
+      <label>AI interviewer language<select value={interviewerLocale} onChange={e=>changeLanguage(e.target.value as Locale)}>
+       {locales.map(l=><option key={l.key} value={l.key}>{l.label}</option>)}</select></label>
+      <label>AI interviewer voice<select value={voice} onChange={e=>setVoice(e.target.value)}>
+       {visibleVoices.map(v=><option key={v} value={v}>{v}</option>)}</select></label>
+      <button className="btn secondary" type="button" disabled={busy||!catalog?.enabled||!visibleVoices.includes(voice)}
+        onClick={previewSelectedVoice}>▶ Preview interviewer voice (Azure)</button>
+      <label>Your spoken input language<select value={candidateLocale} onChange={e=>setCandidateLocale(e.target.value as Locale)}>
+       {locales.map(l=><option key={l.key} value={l.key}>{l.label}</option>)}</select></label>
+      <label className="check"><input type="checkbox" checked={textOnly} onChange={e=>setTextOnly(e.target.checked)}/>
+       Use typed answers without Azure speech (microphone tests not required)</label>
+      <label className="check"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/>
+       I explicitly consent to storing my CV, scenario and interview transcript on this server.</label>
+      <p className="muted small">Changing interviewer language does not affect candidate STT locale. Audio recording is OFF. Browser microphone needs HTTPS or localhost.</p>
+      <button className="btn primary" disabled={busy||!approved||!consent||!visibleVoices.includes(voice)||(!textOnly&&(!micOk||!speakerOk))}
+        onClick={start}>Start AI meeting →</button>
+     </section><section className="panel"><h2>Device & Azure checks</h2>
+       <p>{catalog?.enabled?"Azure Speech configured":"Azure Speech unavailable/not configured; use text-only fallback"}</p>
+       <button className="btn secondary" disabled={busy} onClick={()=>run(async()=>{await checkMicrophone();setMicOk(true);setMessage("Microphone permission granted; audio tracks stopped.");})}>
+        Test microphone {micOk?"✓":""}</button>
+       <button className="btn secondary" disabled={busy} onClick={()=>run(async()=>{await checkSpeaker();setSpeakerOk(true);setMessage("Local speaker tone played.");})}>
+        Test speaker {speakerOk?"✓":""}</button>
+       <p className="muted small">Voice preview is synthesized by Azure from a fixed sample phrase. Microphone and speaker tests are real hardware checks, not demo passes.</p>
+      </section></div>}
+    {step==="meeting"&&<div className="meeting-layout"><section>
+      <div className="meeting-video"><div className="avatar">👩🏻‍💼</div><strong>AI Interviewer · {session?.state}</strong>
+       <p>{session?.nextQuestion||"No current question. Generate or resume the interview."}</p>
+      </div>
+      <div className="meeting-controls">
+       <button className="btn secondary" disabled={busy||!session||session.state!=="IN_PROGRESS"||!!session.nextQuestion}
+        onClick={()=>session&&run(async()=>{await readQuestion(session);})}>Generate question</button>
+       <button className="btn secondary" disabled={busy||textOnly||!session?.nextQuestion||session?.state!=="IN_PROGRESS"} onClick={()=>speak(undefined,false)}>▶ Speak question</button>
+       {isRecording ? (
+        <>
+         <button className="btn primary" style={{background:"#dc2626",borderColor:"#b91c1c",color:"#fff",fontWeight:600}} disabled={busy} onClick={()=>stopListening(true)}>
+          ⏹️ End talk & Submit
+         </button>
+         <button className="btn secondary" style={{borderColor:"#b91c1c",color:"#b91c1c"}} disabled={busy} onClick={()=>stopListening(false)}>
+          ⏹️ End talk (keep text)
+         </button>
+        </>
+       ) : (
+        <button className="btn secondary" disabled={busy||textOnly||!session?.nextQuestionId||session?.state!=="IN_PROGRESS"} onClick={startListening}>
+         🎙️ Speak answer
+        </button>
+       )}
+       <button className="btn secondary" disabled={busy||!session?.nextQuestion||session?.state!=="IN_PROGRESS"} onClick={hintForQuestion}>💡 Private hint</button>
+       <button className="btn secondary" disabled={!session?.nextSuggestedAnswer} onClick={()=>setShowSuggestedAnswer(value=>!value)}>
+        {showSuggestedAnswer?"Hide suggested answer":"Show suggested answer"}
+       </button>
+       {session?.state==="IN_PROGRESS"?<button className="btn secondary" onClick={()=>action("pause")} disabled={busy}>Pause</button>:
+        <button className="btn secondary" onClick={()=>action("resume")} disabled={busy||!["PAUSED","INTERRUPTED"].includes(session?.state||"")}>Resume</button>}
+       <button className="btn danger" onClick={()=>action("finish")} disabled={busy||!["PAUSED","INTERRUPTED","IN_PROGRESS"].includes(session?.state||"")}>Finish</button>
+      </div>
+      {showSuggestedAnswer&&session?.nextSuggestedAnswer&&<div className="panel hint" data-testid="suggested-answer">
+       <h3>Suggested answer · practice reference</h3><p style={{whiteSpace:"pre-wrap"}}>{session.nextSuggestedAnswer}</p>
+       <p className="muted small">Adapt this to your own experience; do not claim details that are not yours.</p>
+      </div>}
+      {hint&&<div className="panel hint"><h3>Private AI coaching hint</h3><p>{hint}</p><p className="muted small">Hint exposure is logged in workflow evidence.</p></div>}
+      <div className="panel form-grid">
+       {isRecording && (
+        <div style={{padding:"12px 16px",background:"#fef2f2",border:"1px solid #fecaca",borderRadius:"8px",marginBottom:"8px"}}>
+         <div style={{display:"flex",alignItems:"center",gap:"10px",color:"#b91c1c",fontWeight:600,fontSize:"14px"}}>
+          <span style={{display:"inline-block",width:10,height:10,borderRadius:"50%",background:"#ef4444"}}></span>
+          🎙️ Micro đang mở liên tục: Bạn cứ nói tự nhiên. Nói xong bấm &quot;End talk &amp; Submit&quot; để nộp câu trả lời.
+         </div>
+         {interimText && (
+          <p style={{margin:"8px 0 0",fontStyle:"italic",color:"#7f1d1d",fontSize:"14px",background:"#fff",padding:"6px 10px",borderRadius:"6px",border:"1px solid #fee2e2"}}>
+           💬 Đang nói: &quot;{interimText}&quot;
+          </p>
+         )}
+        </div>
+       )}
+       <label>Your answer (speech can be corrected before saving)
+       <textarea rows={5} value={answer} maxLength={12000} onChange={e=>{if(!busy){setAnswer(e.target.value);answerKey.current=null;}}}
+         disabled={busy||!session?.nextQuestionId||session?.state!=="IN_PROGRESS"}/></label>
+       <button className="btn primary" onClick={()=>submit()} disabled={busy||!answer.trim()||!session?.nextQuestionId||session?.state!=="IN_PROGRESS"}>✓ Commit answer & next question</button>
+       <p className="muted small">Client speech recognition is labelled as unverified client STT. Your original transcript and any edits are preserved separately.</p>
+      </div>
+     </section><section className="panel transcript"><h2>Interview transcript</h2>
+       {(session?.turns||[]).map(t=><div className="turn" key={t.id}><b>Q{t.sequence}</b><p>{t.question}</p>
+         <b>Candidate · {t.answerSource}</b><p>{t.answer}</p>{t.originalStt&&t.originalStt!==t.answer&&<small>Original STT: {t.originalStt}</small>}</div>)}
+      </section></div>}
+    {step==="results"&&<section className="panel">
+      <h2>Session complete</h2><p>Recorded answers: {session?.turns.length||0}</p>
+      <p>AI scoring and independent audit bundle are planned for P4; they are NOT claimed as completed here.</p>
+      {(session?.turns||[]).map(t=><div className="turn" key={t.id}><b>Q{t.sequence}</b><p>{t.question}</p><p>{t.answer}</p></div>)}
+      <button className="btn secondary" onClick={()=>{setSession(null);changeStep("prepare");}}>New interview</button>
+     </section>}
+    <div className="panel"><h3>Your data</h3>
+     <p className="muted small">Stored CV text, scenarios, interview transcript and evidence can be erased. This deletes both demo and live interviews for your account and cannot be undone.</p>
+     <button className="btn danger" disabled={busy} onClick={()=>{if(window.prompt("Type DELETE ALL MY INTERVIEW DATA to permanently delete all your scenarios and sessions")!=="DELETE ALL MY INTERVIEW DATA")return;
+       void run(async()=>{await api("/api/me/data",{method:"DELETE",body:JSON.stringify({confirm:"DELETE ALL MY INTERVIEW DATA"})});
+         setScenario(null);setPlan(null);setSession(null);setHistory([]);changeStep("prepare");setMessage("Your interview data has been deleted.");});}}>
+       Delete my interview data</button>
     </div>
-    <details className="panel live-history">
-     <summary>Interview transcript ({session?.turns.length||0} answers)</summary>
-     {(session?.turns||[]).map(turn=><div className="turn" key={turn.id}>
-      <b>Q{turn.sequence}</b><p>{turn.question}</p><b>Candidate</b><p>{turn.answer}</p>
-      {turn.originalStt&&turn.originalStt!==turn.answer&&<small>Original STT: {turn.originalStt}</small>}
-     </div>)}
-    </details>
-   </section>}
-   {step==="results"&&<section className="panel">
-    <h2>Session complete</h2><p>Recorded answers: {session?.turns.length||0}</p>
-    <p className="muted">AI evaluation and independent audit are planned for a later phase.</p>
-    <details className="live-details"><summary>Review your interview transcript</summary>
-     {(session?.turns||[]).map(turn=><div className="turn" key={turn.id}>
-      <b>Q{turn.sequence}</b><p>{turn.question}</p><p>{turn.answer}</p>
-     </div>)}
-    </details>
-    <button className="btn primary" onClick={()=>{setSession(null);setStep("setup");setMessage("");setConsent(false);}}>
-     New interview</button>
-   </section>}
-   <details className="panel live-privacy">
-    <summary>Privacy & data</summary>
-    <p className="muted small">Delete stored CV text, interview scenarios, transcripts, and evidence for this account. This also removes offline demo sessions.</p>
-    <button className="btn danger" disabled={busy} onClick={()=>{
-     if(window.prompt("Type DELETE ALL MY INTERVIEW DATA to permanently delete all your scenarios and sessions")!=="DELETE ALL MY INTERVIEW DATA")return;
-     void run(async()=>{await api("/api/me/data",{method:"DELETE",body:JSON.stringify({confirm:"DELETE ALL MY INTERVIEW DATA"})});
-      setScenario(null);setPlan(null);setGeneratedKey(null);setSession(null);setHistory([]);setConsent(false);setStep("setup");
-      setMessage("Your interview data has been deleted.");});
-    }}>Delete my interview data</button>
-   </details>
-  </main>
- </div>;
+    <footer>AI planning (P1) · Azure browser speech (P2) · Adaptive interview and hints (P3) · Evaluation and audit: P4</footer>
+   </main></div></div>;
 }

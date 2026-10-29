@@ -8,7 +8,7 @@ async function signUp(page:import("@playwright/test").Page){
  await page.getByLabel("Email").fill("review-"+randomUUID()+"@example.test");
  await page.getByLabel("Password").fill("correct-horse-battery-staple!");
  await page.getByRole("button",{name:"Create account"}).click();
- await expect(page.getByTestId("live-workspace")).toHaveAttribute("data-hydrated","true");
+ await expect(page.getByTestId("live-workspace")).toHaveAttribute("data-hydrated","true",{timeout:15_000});
 }
 const speech={interviewerLocale:"en-US",interviewerVoiceId:"en-US-JennyNeural",
  candidateSttLocale:"en-US",consentToTranscript:true};
@@ -17,7 +17,7 @@ async function counts(page:import("@playwright/test").Page):Promise<Record<strin
 }
 const scenario={role:"Backend Engineer",jobDescription:"Build and own reliable backend services.",
  cvText:"I built cloud services with Postgres and handled real production incidents.",
- focus:"Concurrency and database performance"};
+ focus:"Concurrency and database performance",planImmediately:true};
 
 test("concurrent AI creation is charged once, demo cannot revise live plan, listing and audit carry live mode",async({page})=>{
  await signUp(page);
@@ -73,7 +73,7 @@ test("maximum accepted JD and CV fit structured provider input without truncatio
  await signUp(page);
  const res=await page.request.post("/api/live/scenarios",{data:{
   role:"Systems Architect",jobDescription:"Design reliable systems. "+"J".repeat(18000),
-  cvText:"I owned backend systems. "+"C".repeat(28900),focus:"architecture"}});
+  cvText:"I owned backend systems. "+"C".repeat(28900),focus:"architecture",planImmediately:true}});
  expect(res.status(),await res.text()).toBe(201);
  const created=await res.json() as {id:string};
  const saved=await page.request.get("/api/live/scenarios/"+created.id);

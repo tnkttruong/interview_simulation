@@ -63,12 +63,22 @@ export default function AiSettingsForm({email}:{email:string}){
        </label>
        <p className="muted small">{labels.find(x=>x.id===form.provider)?.description}</p>
        <p className="small">{current?.available?"Detected / enabled on server":"Not available on server. Save is allowed, but live AI calls will fail until configured."}</p>
+       {models.length>0&&(
+        <label>Select model
+         <select aria-label="Select model" value={models.includes(form.model)?form.model:"custom"} onChange={e=>{
+          if(e.target.value!=="custom") setForm({...form,model:e.target.value});
+         }}>
+          {models.map(x=><option key={x} value={x}>{x}</option>)}
+          <option value="custom">Custom model…</option>
+         </select>
+        </label>
+       )}
        <label>AI model
         <input aria-label="AI model" list="ai-model-suggestions" maxLength={100} value={form.model}
          onChange={e=>setForm({...form,model:e.target.value})}/>
         <datalist id="ai-model-suggestions">{models.map(x=><option key={x} value={x}/>)}</datalist>
        </label>
-       <p className="muted small">Model suggestions follow the Codex and Agy adapters in auto-dev-workflow. Agy also discovers installed CLI models. You may enter a valid custom model ID.</p>
+       <p className="muted small">Choose from suggested models or enter a custom model ID. Agy and Codex adapt to installed CLI models.</p>
        <div className="soft-notice">
         {form.provider==="api_key"?"API key remains in server environment; this page never reads or stores your key.":
          "CLI must be installed and logged in under the account running the server. No shell arguments or API secrets are editable from this page."}
