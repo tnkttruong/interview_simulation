@@ -52,6 +52,12 @@ test("Simple flow: JD + CV, generated script, direct meeting, hint and deletion"
  await page.getByRole("button",{name:"Resume",exact:true}).click();
  await page.getByRole("button",{name:"Finish interview"}).click();
  await expect(page.getByText("Recorded answers: 1")).toBeVisible();
+ await page.getByRole("button",{name:"New interview"}).click();
+ await expect(page.getByTestId("generated-script")).toBeVisible();
+ await expect(page.getByRole("checkbox",{name:/I explicitly consent/})).not.toBeChecked();
+ await page.getByText("Previous interviews (1)").click();
+ await page.getByRole("button",{name:/COMPLETED/}).click();
+ await expect(page.getByText("Recorded answers: 1")).toBeVisible();
  page.on("dialog",dialog=>dialog.accept("DELETE ALL MY INTERVIEW DATA"));
  await page.getByText("Privacy & data").click();
  await page.getByRole("button",{name:"Delete my interview data"}).click();
