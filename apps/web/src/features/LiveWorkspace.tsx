@@ -2,7 +2,7 @@
 import {useEffect,useRef,useState} from "react";
 import Link from "next/link";
 import {voiceByLocale} from "@interview/core";
-import {checkMicrophone,checkSpeaker,listen,say,type SpeechCredential} from "./azure-client";
+import {listen,say,type SpeechCredential} from "./azure-client";
 import {extractPdf} from "./pdf-client";
 type Locale=keyof typeof voiceByLocale;
 type Plan={role:string;level:string;overview:string;stages:{topic:string;questions:string[];suggestedAnswers?:string[]}[];rubric:{competency:string;criteria:string}[]};
@@ -22,16 +22,17 @@ async function api<T>(url:string,init?:RequestInit):Promise<T>{
  return data;
 }
 export default function LiveWorkspace({email}:{email:string}){
- const [step,setStep]=useState<"prepare"|"review"|"preflight"|"meeting"|"results">("prepare");
+ const [step,setStep]=useState<"setup"|"meeting"|"results">("setup");
  const [hydrated,setHydrated]=useState(false);
- const [role,setRole]=useState("Senior Backend Engineer"),[jd,setJd]=useState("");
+ const [role,setRole]=useState(""),[jd,setJd]=useState("");
  const [focus,setFocus]=useState(""),[cvText,setCvText]=useState(""),[cvName,setCvName]=useState("pasted-cv.txt");
  const [scenario,setScenario]=useState<Scenario|null>(null),[plan,setPlan]=useState<Plan|null>(null);
  const [feedback,setFeedback]=useState(""),[candidateLocale,setCandidateLocale]=useState<Locale>("en-US");
  const [interviewerLocale,setInterviewerLocale]=useState<Locale>("en-US");
  const [voice,setVoice]=useState<string>(voiceByLocale["en-US"][0]),[catalog,setCatalog]=useState<Catalog|null>(null);
- const [consent,setConsent]=useState(false),[textOnly,setTextOnly]=useState(false),[micOk,setMicOk]=useState(false);
- const [speakerOk,setSpeakerOk]=useState(false),[session,setSession]=useState<Session|null>(null);
+ const [consent,setConsent]=useState(false),[voiceMode,setVoiceMode]=useState<"auto"|"typed"|"voice">("auto");
+ const [session,setSession]=useState<Session|null>(null);
+ const [generatedKey,setGeneratedKey]=useState<string|null>(null);
  const [answer,setAnswer]=useState(""),[recognized,setRecognized]=useState(""),[hint,setHint]=useState("");
  const [showSuggestedAnswer,setShowSuggestedAnswer]=useState(false);
  const [busy,setBusy]=useState(false),[message,setMessage]=useState(""),[error,setError]=useState("");
@@ -40,6 +41,10 @@ export default function LiveWorkspace({email}:{email:string}){
  const credential=useRef<{value:SpeechCredential;expires:number}|null>(null);
  const visibleVoices=catalog?.enabled?catalog.voices[interviewerLocale]||[]:[...voiceByLocale[interviewerLocale]];
  const approved=!!scenario?.revisions.find(x=>x.revision===scenario.latestRevision)?.approvedAt;
+ const inputKey=JSON.stringify({role,jd,focus,cvText,cvName});
+ const planCurrent=!!scenario&&!!plan&&generatedKey===inputKey;
+ const questionCount=plan?.stages.reduce((total,stage)=>total+stage.questions.length,0)??0;
+ const textOnly=voiceMode==="typed"||(voiceMode==="auto"&&(!catalog?.enabled||!visibleVoices.includes(voice)));
  useEffect(()=>{
   fetch("/api/me/ai-settings",{cache:"no-store"}).then(x=>x.json()).then((d:{settings?:{interviewerLocale:Locale;candidateSttLocale:Locale;voiceId:string}})=>{
    if(d.settings){setInterviewerLocale(d.settings.interviewerLocale);setCandidateLocale(d.settings.candidateSttLocale);setVoice(d.settings.voiceId);}
@@ -62,7 +67,6 @@ export default function LiveWorkspace({email}:{email:string}){
  function changeLanguage(next:Locale){
   setInterviewerLocale(next);
   setVoice((catalog?.enabled?catalog.voices[next]:undefined)?.[0]||voiceByLocale[next][0]);
-  setMicOk(false);
  }
  async function upload(file:File){
   await run(async()=>{
@@ -83,8 +87,9 @@ export default function LiveWorkspace({email}:{email:string}){
  async function create(){
   await run(async()=>{
    const generated=await api<Scenario>("/api/live/scenarios",{method:"POST",
-    body:JSON.stringify({role,jobDescription:jd,focus,cvText,cvFilename:cvName})});
-   await loadPlan(generated.id);setConsent(false);setStep("review");
+    body:JSON.stringify({role:role.trim()||"Position specified in job description",jobDescription:jd,focus,cvText,cvFilename:cvName})});
+   await loadPlan(generated.id);setGeneratedKey(inputKey);setConsent(false);
+   setMessage("Interview script is ready. Review it below or start the meeting.");
   });
  }
  async function revise(){
@@ -92,15 +97,7 @@ export default function LiveWorkspace({email}:{email:string}){
   await run(async()=>{
    await api("/api/live/scenarios/"+scenario.id+"/revise",{method:"POST",body:JSON.stringify({feedback,expectedRevision:scenario.latestRevision})});
    await loadPlan(scenario.id);setFeedback("");setConsent(false);
-  });
- }
- async function approve(){
-  if(!scenario)return;
-  await run(async()=>{
-   const result=await api<Scenario>("/api/demo/scenarios/"+scenario.id,{
-    method:"PATCH",body:JSON.stringify({action:"approve",expectedRevision:scenario.latestRevision})});
-   setScenario(result);setConsent(false);setMicOk(false);setSpeakerOk(false);
-   setStep("preflight");
+   setMessage("Interview script updated. You can start the meeting.");
   });
  }
  async function getCredential(){
@@ -135,19 +132,26 @@ export default function LiveWorkspace({email}:{email:string}){
   });
  }
  async function start(){
-  if(!scenario||!approved||!consent)return;
+  if(!scenario||!planCurrent||!consent)return;
   await run(async()=>{
-   if(!textOnly&&(!micOk||!speakerOk))throw new Error("Test mic and speaker, or enable text-only fallback");
-   if(!textOnly&&catalog&&!catalog.enabled)throw new Error("Azure not configured; enable text-only fallback");
-   if(!visibleVoices.includes(voice))throw new Error("Selected voice unavailable in region");
+   if(voiceMode==="voice"&&!catalog?.enabled)throw new Error("Azure Speech is unavailable. Select automatic or typed mode.");
+   if(!textOnly&&!visibleVoices.includes(voice))throw new Error("Selected voice is unavailable in this Azure region");
+   // Approval is still recorded on the server, but no extra approval screen is needed.
+   if(!approved){
+    const updated=await api<Scenario>("/api/demo/scenarios/"+scenario.id,{
+     method:"PATCH",body:JSON.stringify({action:"approve",expectedRevision:scenario.latestRevision})});
+    setScenario(updated);
+   }
    if(!startKey.current)startKey.current=crypto.randomUUID();
-   const s=await api<Session>("/api/live/sessions",{method:"POST",body:JSON.stringify({
+   const started=await api<Session>("/api/live/sessions",{method:"POST",body:JSON.stringify({
     scenarioId:scenario.id,revision:scenario.latestRevision,requestKey:startKey.current,
     speech:{interviewerLocale,interviewerVoiceId:voice,candidateSttLocale:candidateLocale,consentToTranscript:true}
    })});
-   setSession(s);setStep("meeting");startKey.current=null;credential.current=null;
-   const q=await readQuestion(s);
-   setMessage(q.nextQuestion?"AI interviewer is ready.":"Interview started. Generate the first question.");
+   setSession(started);setStep("meeting");startKey.current=null;credential.current=null;
+   setHistory(previous=>[{id:started.id,mode:started.mode,state:started.state,createdAt:Date.now()},
+    ...previous.filter(item=>item.id!==started.id)]);
+   const next=await readQuestion(started);
+   setMessage(next.nextQuestion?"Your AI interviewer is ready.":"Interview started. Select Generate question to retry.");
   });
  }
  async function refreshSession(id:string){
@@ -161,7 +165,7 @@ export default function LiveWorkspace({email}:{email:string}){
    setShowSuggestedAnswer(false);setHint("");
    const config=JSON.parse(selected.speechConfig);
    setInterviewerLocale(config.interviewerLocale);setCandidateLocale(config.candidateSttLocale);
-   setVoice(config.interviewerVoiceId);setTextOnly(true);
+   setVoice(config.interviewerVoiceId);setVoiceMode("typed");
    setStep(selected.state==="COMPLETED"?"results":"meeting");
   });
  }
@@ -171,6 +175,7 @@ export default function LiveWorkspace({email}:{email:string}){
    const next=await api<Session>("/api/demo/sessions/"+session.id,{method:"PATCH",
     body:JSON.stringify({action:kind,expectedVersion:session.version})});
    setSession(next);setShowSuggestedAnswer(false);
+   setHistory(previous=>previous.map(item=>item.id===next.id?{...item,state:next.state}:item));
    if(kind==="finish")setStep("results");
   });
  }
@@ -220,128 +225,222 @@ export default function LiveWorkspace({email}:{email:string}){
    setMessage("Speech recognized on this device. Edit the text before confirming if needed.");
   });
  }
- return <div className="shell" data-testid="live-workspace" data-hydrated={hydrated?"true":"false"}>
-  <aside className="sidebar"><div className="brand">◉ <strong>Interview Simulation</strong></div>
-   <div className="side-caption">AI LIVE · P1–P3</div>
-   <nav aria-label="Interview steps">
-    {(["prepare","review","preflight","meeting","results"] as const).map((x,i)=>
-     <button key={x} className={step===x?"active":""} onClick={()=>setStep(x)}>{i+1}. {x}</button>)}
-    <Link href="/settings" style={{color:"white",padding:14}}>⚙ AI Settings</Link>
-    <Link href="/" style={{color:"white",padding:14}}>← Offline P0 demo</Link>
-   </nav><div className="sidebar-bottom">AI responses require your own model key. Azure speech requires your own Azure resource.</div>
-  </aside><div className="main-area">
-   <header className="topbar"><span className="eyebrow">LIVE AI MOCK INTERVIEW</span><small>{email}</small></header>
-   <main className="page"><h1>Practice a real interview with AI</h1>
-    <p className="lead">Scenario from your CV and job description → approval → multilingual voice or typed meeting → adaptive questions and private answer coaching.</p>
-    {error&&<div role="alert" className="alert error">{error}</div>}
-    {message&&<div role="status" className="alert info">{message}</div>}
-    {step==="prepare"&&<div className="cols"><section className="panel form-grid">
-     <h2>1. Job & CV</h2>
-     <label>Role<input value={role} maxLength={180} onChange={e=>setRole(e.target.value)}/></label>
-     <label>Job description<textarea rows={7} value={jd} maxLength={20000} onChange={e=>setJd(e.target.value)}/></label>
-     <label>Interview focus (optional)<input value={focus} maxLength={1500} onChange={e=>setFocus(e.target.value)}/></label>
-     <label>Upload CV (PDF, DOCX, TXT, MD; ≤4 MB)
-      <input type="file" accept=".pdf,.docx,.txt,.md" disabled={busy} onChange={e=>{const file=e.target.files?.[0];if(file)void upload(file);}}/>
-     </label>
-     <label>Or paste/edit CV text<textarea rows={7} value={cvText} maxLength={30000}
-       onChange={e=>{setCvText(e.target.value);setCvName("pasted-cv.txt");}}/></label>
-     <button className="btn primary" disabled={busy||jd.trim().length<10||cvText.trim().length<15}
-      onClick={create}>Generate AI interview scenario</button>
-    </section><section className="panel"><h2>Prior live sessions</h2>
-      {history.filter(x=>x.mode==="live").length===0?<p>No previous AI sessions.</p>:
-       history.filter(x=>x.mode==="live").map(s=><button key={s.id} className="list-button" disabled={busy}
-        onClick={()=>continueSession(s.id)}>{new Date(s.createdAt).toLocaleString()} · {s.state} →</button>)}
-     <p className="muted small">PDF text extraction happens in your browser. The extracted CV text is saved on this server for AI planning. Voice audio is processed by Azure but is not saved by this app.</p>
-    </section></div>}
-    {step==="review"&&<div className="cols"><section className="panel">
-      <h2>2. Review scenario · revision {scenario?.latestRevision}</h2>
-      {!plan?<p>Generate a scenario first.</p>:<>
-       <h3>{plan.role} · {plan.level}</h3><p>{plan.overview}</p>
-       {plan.stages.map((s,i)=><div key={i}><h3>{i+1}. {s.topic}</h3>
-        <ol>{s.questions.map((q,j)=><li key={j}>{q}
-         {s.suggestedAnswers?.[j]&&<details><summary>Suggested answer</summary>
-          <p style={{whiteSpace:"pre-wrap"}}>{s.suggestedAnswers[j]}</p></details>}
-        </li>)}</ol></div>)}
-       <h3>Evaluation rubric</h3><ul>{plan.rubric.map((rub,i)=><li key={i}><b>{rub.competency}:</b> {rub.criteria}</li>)}</ul>
-       <button className="btn primary" onClick={approve} disabled={busy||!scenario}>Approve this revision →</button>
-      </>}
-     </section><section className="panel form-grid"><h2>Ask planner to revise</h2>
-       <p>Revisions create a new unapproved version; previously approved versions remain immutable.</p>
-       <textarea aria-label="Revision request" rows={5} value={feedback} maxLength={1000}
-        onChange={e=>setFeedback(e.target.value)}/>
-       <button className="btn secondary" onClick={revise} disabled={busy||!scenario||feedback.trim().length<3}>Revise with AI</button>
-      </section></div>}
-    {step==="preflight"&&<div className="cols"><section className="panel form-grid">
-      <h2>3. Meeting preflight</h2>
-      <label>AI interviewer language<select value={interviewerLocale} onChange={e=>changeLanguage(e.target.value as Locale)}>
-       {locales.map(l=><option key={l.key} value={l.key}>{l.label}</option>)}</select></label>
-      <label>AI interviewer voice<select value={voice} onChange={e=>setVoice(e.target.value)}>
-       {visibleVoices.map(v=><option key={v} value={v}>{v}</option>)}</select></label>
-      <button className="btn secondary" type="button" disabled={busy||!catalog?.enabled||!visibleVoices.includes(voice)}
-        onClick={previewSelectedVoice}>▶ Preview interviewer voice (Azure)</button>
-      <label>Your spoken input language<select value={candidateLocale} onChange={e=>setCandidateLocale(e.target.value as Locale)}>
-       {locales.map(l=><option key={l.key} value={l.key}>{l.label}</option>)}</select></label>
-      <label className="check"><input type="checkbox" checked={textOnly} onChange={e=>setTextOnly(e.target.checked)}/>
-       Use typed answers without Azure speech (microphone tests not required)</label>
-      <label className="check"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/>
-       I explicitly consent to storing my CV, scenario and interview transcript on this server.</label>
-      <p className="muted small">Changing interviewer language does not affect candidate STT locale. Audio recording is OFF. Browser microphone needs HTTPS or localhost.</p>
-      <button className="btn primary" disabled={busy||!approved||!consent||!visibleVoices.includes(voice)||(!textOnly&&(!micOk||!speakerOk))}
-        onClick={start}>Start AI meeting →</button>
-     </section><section className="panel"><h2>Device & Azure checks</h2>
-       <p>{catalog?.enabled?"Azure Speech configured":"Azure Speech unavailable/not configured; use text-only fallback"}</p>
-       <button className="btn secondary" disabled={busy} onClick={()=>run(async()=>{await checkMicrophone();setMicOk(true);setMessage("Microphone permission granted; audio tracks stopped.");})}>
-        Test microphone {micOk?"✓":""}</button>
-       <button className="btn secondary" disabled={busy} onClick={()=>run(async()=>{await checkSpeaker();setSpeakerOk(true);setMessage("Local speaker tone played.");})}>
-        Test speaker {speakerOk?"✓":""}</button>
-       <p className="muted small">Voice preview is synthesized by Azure from a fixed sample phrase. Microphone and speaker tests are real hardware checks, not demo passes.</p>
-      </section></div>}
-    {step==="meeting"&&<div className="meeting-layout"><section>
-      <div className="meeting-video"><div className="avatar">👩🏻‍💼</div><strong>AI Interviewer · {session?.state}</strong>
-       <p>{session?.nextQuestion||"No current question. Generate or resume the interview."}</p>
-      </div>
-      <div className="meeting-controls">
-       <button className="btn secondary" disabled={busy||!session||session.state!=="IN_PROGRESS"||!!session.nextQuestion}
-        onClick={()=>session&&run(async()=>{await readQuestion(session);})}>Generate question</button>
-       <button className="btn secondary" disabled={busy||textOnly||!session?.nextQuestion||session?.state!=="IN_PROGRESS"} onClick={speak}>▶ Speak question</button>
-       <button className="btn secondary" disabled={busy||textOnly||!session?.nextQuestion||session?.state!=="IN_PROGRESS"} onClick={record}>🎙 Speak answer</button>
-       <button className="btn secondary" disabled={!session?.nextSuggestedAnswer||session?.state!=="IN_PROGRESS"}
-        aria-pressed={showSuggestedAnswer} onClick={()=>setShowSuggestedAnswer(value=>!value)}>
-         {showSuggestedAnswer?"Hide suggested answer":"Show suggested answer"}</button>
-       <button className="btn secondary" disabled={busy||!session?.nextQuestion||session?.state!=="IN_PROGRESS"} onClick={hintForQuestion}>💡 Private hint</button>
-       {session?.state==="IN_PROGRESS"?<button className="btn secondary" onClick={()=>action("pause")} disabled={busy}>Pause</button>:
-        <button className="btn secondary" onClick={()=>action("resume")} disabled={busy||!["PAUSED","INTERRUPTED"].includes(session?.state||"")}>Resume</button>}
-       <button className="btn danger" onClick={()=>action("finish")} disabled={busy||!["PAUSED","INTERRUPTED","IN_PROGRESS"].includes(session?.state||"")}>Finish</button>
-      </div>
-      {showSuggestedAnswer&&session?.nextSuggestedAnswer&&<div className="panel hint" data-testid="suggested-answer">
-       <h3>Suggested answer · practice reference</h3>
-       <p style={{whiteSpace:"pre-wrap"}}>{session.nextSuggestedAnswer}</p>
-       <p className="muted small">Use this as guidance, not as a claim about your own experience.</p>
-      </div>}
-      {hint&&<div className="panel hint"><h3>Private AI coaching hint</h3><p>{hint}</p><p className="muted small">Hint exposure is logged in workflow evidence.</p></div>}
-      <div className="panel form-grid"><label>Your answer (speech can be corrected before saving)
-       <textarea rows={5} value={answer} maxLength={12000} onChange={e=>{if(!busy){setAnswer(e.target.value);answerKey.current=null;}}}
-         disabled={busy||!session?.nextQuestionId||session?.state!=="IN_PROGRESS"}/></label>
-       <button className="btn primary" onClick={submit} disabled={busy||!answer.trim()||!session?.nextQuestionId||session?.state!=="IN_PROGRESS"}>✓ Commit answer & next question</button>
-       <p className="muted small">Client speech recognition is labelled as unverified client STT. Your original transcript and any edits are preserved separately.</p>
-      </div>
-     </section><section className="panel transcript"><h2>Interview transcript</h2>
-       {(session?.turns||[]).map(t=><div className="turn" key={t.id}><b>Q{t.sequence}</b><p>{t.question}</p>
-         <b>Candidate · {t.answerSource}</b><p>{t.answer}</p>{t.originalStt&&t.originalStt!==t.answer&&<small>Original STT: {t.originalStt}</small>}</div>)}
-      </section></div>}
-    {step==="results"&&<section className="panel">
-      <h2>Session complete</h2><p>Recorded answers: {session?.turns.length||0}</p>
-      <p>AI scoring and independent audit bundle are planned for P4; they are NOT claimed as completed here.</p>
-      {(session?.turns||[]).map(t=><div className="turn" key={t.id}><b>Q{t.sequence}</b><p>{t.question}</p><p>{t.answer}</p></div>)}
-      <button className="btn secondary" onClick={()=>{setSession(null);setStep("prepare");}}>New interview</button>
-     </section>}
-    <div className="panel"><h3>Your data</h3>
-     <p className="muted small">Stored CV text, scenarios, interview transcript and evidence can be erased. This deletes both demo and live interviews for your account and cannot be undone.</p>
-     <button className="btn danger" disabled={busy} onClick={()=>{if(window.prompt("Type DELETE ALL MY INTERVIEW DATA to permanently delete all your scenarios and sessions")!=="DELETE ALL MY INTERVIEW DATA")return;
-       void run(async()=>{await api("/api/me/data",{method:"DELETE",body:JSON.stringify({confirm:"DELETE ALL MY INTERVIEW DATA"})});
-         setScenario(null);setPlan(null);setSession(null);setHistory([]);setStep("prepare");setMessage("Your interview data has been deleted.");});}}>
-       Delete my interview data</button>
+ return <div className="live-simple-shell" data-testid="live-workspace" data-hydrated={hydrated?"true":"false"}>
+  <header className="live-simple-topbar">
+   <strong>◉ Interview Simulation</strong>
+   <nav aria-label="App navigation">
+    <Link href="/settings">AI Settings</Link>
+    <small>{email}</small>
+   </nav>
+  </header>
+  <main className="live-simple-main">
+   {step==="setup"&&<>
+    <div className="live-simple-heading">
+     <span className="eyebrow">AI MOCK INTERVIEW</span>
+     <h1>Practice a real interview with AI</h1>
+     <p className="lead">Add a job description and your CV, generate an interview script, then start the meeting.</p>
     </div>
-    <footer>AI planning (P1) · Azure browser speech (P2) · Adaptive interview and hints (P3) · Evaluation and audit: P4</footer>
-   </main></div></div>;
+   </>}
+   {step==="meeting"&&<div className="live-simple-heading">
+    <span className="eyebrow">LIVE MEETING</span>
+    <h1>Interview in progress</h1>
+   </div>}
+   {step==="results"&&<div className="live-simple-heading">
+    <span className="eyebrow">INTERVIEW COMPLETE</span>
+    <h1>Interview summary</h1>
+   </div>}
+   {error&&<div role="alert" className="alert error">{error}</div>}
+   {message&&<div role="status" className="alert info">{message}</div>}
+   {step==="setup"&&<>
+    <section className="panel live-form">
+     <h2>Job description & CV</h2>
+     <div className="live-inputs">
+      <label>Job description
+       <textarea rows={10} value={jd} maxLength={20000} placeholder="Paste the job description here..."
+        onChange={e=>setJd(e.target.value)}/>
+      </label>
+      <div className="live-cv-input">
+       <label>Upload CV (PDF, DOCX, TXT, MD; ≤4 MB)
+        <input type="file" accept=".pdf,.docx,.txt,.md" disabled={busy}
+         onChange={e=>{const file=e.target.files?.[0];if(file)void upload(file);}}/>
+       </label>
+       <p className="muted small">Or paste your CV below. You can edit the extracted text.</p>
+       <label>Or paste/edit CV text
+        <textarea rows={7} value={cvText} maxLength={30000} placeholder="Paste your experience, skills and projects..."
+         onChange={e=>{setCvText(e.target.value);setCvName("pasted-cv.txt");}}/>
+       </label>
+      </div>
+     </div>
+     <details className="live-details">
+      <summary>Optional: role and interview focus</summary>
+      <div className="live-extra-fields">
+       <label>Role (optional)<input value={role} maxLength={180} placeholder="AI will infer from JD"
+        onChange={e=>setRole(e.target.value)}/></label>
+       <label>Interview focus (optional)<input value={focus} maxLength={1500}
+        placeholder="Example: backend architecture and incident response" onChange={e=>setFocus(e.target.value)}/></label>
+      </div>
+     </details>
+     <div className="live-action-row">
+      <button className="btn primary" disabled={busy||jd.trim().length<10||cvText.trim().length<15}
+       onClick={create}>{busy?"Working...":"Generate AI interview scenario"}</button>
+      <span className="muted small">JD and CV are stored on this server when you generate a script.</span>
+     </div>
+    </section>
+    {planCurrent&&plan&&<section className="panel live-script" data-testid="generated-script">
+     <div className="live-script-heading">
+      <div><span className="eyebrow">READY TO PRACTICE</span><h2>{plan.role} · {plan.level}</h2></div>
+      <span className="pill">{questionCount} planned questions</span>
+     </div>
+     <p>{plan.overview}</p>
+     <label className="check">
+      <input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/>
+      I explicitly consent to storing my CV, interview scenario and transcript on this server.
+     </label>
+     <div className="live-action-row">
+      <button className="btn primary live-main-cta" disabled={busy||!consent} onClick={start}>▶ Start AI meeting</button>
+      <span className="muted small">{textOnly?"Typed answers · no Azure setup required":"Voice enabled · microphone access requested when recording"}</span>
+     </div>
+     <details className="live-details">
+      <summary>View interview questions & suggested answers</summary>
+      {plan.stages.map((stage,i)=><div className="live-stage" key={i}>
+       <h3>{i+1}. {stage.topic}</h3>
+       <ol>{stage.questions.map((question,j)=><li key={j}>{question}
+        {stage.suggestedAnswers?.[j]&&<details className="live-answer-details">
+         <summary>Suggested answer</summary>
+         <p style={{whiteSpace:"pre-wrap"}}>{stage.suggestedAnswers[j]}</p>
+        </details>}</li>)}</ol>
+      </div>)}
+     </details>
+     <details className="live-details">
+      <summary>Refine script with AI (optional)</summary>
+      <div className="live-extra-fields">
+       <label>Revision request
+        <textarea rows={3} value={feedback} maxLength={1000}
+         placeholder="Example: Ask more architecture questions"
+         onChange={e=>setFeedback(e.target.value)}/>
+       </label>
+       <button className="btn secondary" onClick={revise} disabled={busy||feedback.trim().length<3}>Revise with AI</button>
+      </div>
+     </details>
+     <details className="live-details">
+      <summary>Meeting preferences (optional)</summary>
+      <div className="live-extra-fields">
+       <label>AI interviewer language
+        <select value={interviewerLocale} onChange={e=>changeLanguage(e.target.value as Locale)}>
+         {locales.map(locale=><option key={locale.key} value={locale.key}>{locale.label}</option>)}
+        </select>
+       </label>
+       <label>Answer input mode
+        <select value={voiceMode} onChange={e=>setVoiceMode(e.target.value as "auto"|"typed"|"voice")}>
+         <option value="auto">Automatic (voice when configured, otherwise typed)</option>
+         <option value="typed">Typed answers</option>
+         <option value="voice" disabled={!catalog?.enabled}>Azure microphone and voice</option>
+        </select>
+       </label>
+       {!textOnly&&<>
+        <label>AI interviewer voice<select value={voice} onChange={e=>setVoice(e.target.value)}>
+         {visibleVoices.map(name=><option key={name} value={name}>{name}</option>)}
+        </select></label>
+        <label>Your spoken input language<select value={candidateLocale}
+         onChange={e=>setCandidateLocale(e.target.value as Locale)}>
+         {locales.map(locale=><option key={locale.key} value={locale.key}>{locale.label}</option>)}
+        </select></label>
+        <button type="button" className="btn secondary" disabled={busy||!catalog?.enabled}
+         onClick={previewSelectedVoice}>▶ Preview voice</button>
+       </>}
+       <p className="muted small">{catalog?.enabled?"Azure Speech is configured.":"Azure Speech is not configured; typed answers work without microphone setup."}</p>
+      </div>
+     </details>
+    </section>}
+    {!!plan&&!planCurrent&&<div role="status" className="alert info">
+     Your JD or CV changed. Generate an updated script before starting.
+    </div>}
+    <details className="panel live-history">
+     <summary>Previous interviews ({history.filter(item=>item.mode==="live").length})</summary>
+     {history.filter(item=>item.mode==="live").length===0?<p className="muted">No previous sessions yet.</p>:
+      history.filter(item=>item.mode==="live").map(item=><button className="list-button" key={item.id}
+       disabled={busy} onClick={()=>continueSession(item.id)}>
+       {new Date(item.createdAt).toLocaleString()} · {item.state} →</button>)}
+    </details>
+   </>}
+   {step==="meeting"&&<section className="live-meeting">
+    <div className="live-meeting-heading">
+     <strong>Question {Math.min((session?.turns.length||0)+1,15)} / 15</strong>
+     <button className="btn danger" disabled={busy||!session||!["IN_PROGRESS","PAUSED","INTERRUPTED"].includes(session.state)}
+      onClick={()=>action("finish")}>Finish interview</button>
+    </div>
+    <div className="meeting-video">
+     <div className="avatar">👩🏻‍💼</div>
+     <strong>AI Interviewer · {session?.state}</strong>
+     <p>{session?.nextQuestion||"No active question. Resume or generate the next question."}</p>
+    </div>
+    <div className="live-meeting-tools">
+     {!session?.nextQuestion&&session?.state==="IN_PROGRESS"&&
+      <button className="btn secondary" disabled={busy} onClick={()=>session&&run(async()=>{await readQuestion(session);})}>
+       Generate question</button>}
+     {!textOnly&&session?.state==="IN_PROGRESS"&&<>
+      <button className="btn secondary" disabled={busy||!session?.nextQuestion} onClick={speak}>▶ Listen</button>
+      <button className="btn secondary" disabled={busy||!session?.nextQuestion} onClick={record}>🎙 Speak answer</button>
+     </>}
+     <button className="btn secondary" disabled={!session?.nextSuggestedAnswer||session?.state!=="IN_PROGRESS"}
+      aria-pressed={showSuggestedAnswer} onClick={()=>setShowSuggestedAnswer(value=>!value)}>
+      {showSuggestedAnswer?"Hide suggested answer":"Show suggested answer"}</button>
+     <button className="btn secondary" disabled={busy||!session?.nextQuestion||session?.state!=="IN_PROGRESS"}
+      onClick={hintForQuestion}>💡 Private hint</button>
+     <details className="live-controls-more">
+      <summary>More meeting controls</summary>
+      {session?.state==="IN_PROGRESS"?<button className="btn secondary" disabled={busy}
+       onClick={()=>action("pause")}>Pause</button>:
+       <button className="btn secondary" disabled={busy||!["PAUSED","INTERRUPTED"].includes(session?.state||"")}
+        onClick={()=>action("resume")}>Resume</button>}
+     </details>
+    </div>
+    {showSuggestedAnswer&&session?.nextSuggestedAnswer&&<div className="panel hint" data-testid="suggested-answer">
+     <h3>Suggested answer · practice reference</h3>
+     <p style={{whiteSpace:"pre-wrap"}}>{session.nextSuggestedAnswer}</p>
+     <p className="muted small">Use it as a guide, not a claim about your experience.</p>
+    </div>}
+    {hint&&<div className="panel hint"><h3>Private AI coaching hint</h3><p>{hint}</p></div>}
+    <div className="panel form-grid">
+     <label>Your answer (speech can be corrected before saving)
+      <textarea rows={5} value={answer} maxLength={12000}
+       placeholder="Type your answer or use the microphone..."
+       onChange={e=>{if(!busy){setAnswer(e.target.value);answerKey.current=null;}}}
+       disabled={busy||!session?.nextQuestionId||session?.state!=="IN_PROGRESS"}/>
+     </label>
+     <button className="btn primary" onClick={submit}
+      disabled={busy||!answer.trim()||!session?.nextQuestionId||session?.state!=="IN_PROGRESS"}>
+      ✓ Commit answer & next question</button>
+    </div>
+    <details className="panel live-history">
+     <summary>Interview transcript ({session?.turns.length||0} answers)</summary>
+     {(session?.turns||[]).map(turn=><div className="turn" key={turn.id}>
+      <b>Q{turn.sequence}</b><p>{turn.question}</p><b>Candidate</b><p>{turn.answer}</p>
+      {turn.originalStt&&turn.originalStt!==turn.answer&&<small>Original STT: {turn.originalStt}</small>}
+     </div>)}
+    </details>
+   </section>}
+   {step==="results"&&<section className="panel">
+    <h2>Session complete</h2><p>Recorded answers: {session?.turns.length||0}</p>
+    <p className="muted">AI evaluation and independent audit are planned for a later phase.</p>
+    <details className="live-details"><summary>Review your interview transcript</summary>
+     {(session?.turns||[]).map(turn=><div className="turn" key={turn.id}>
+      <b>Q{turn.sequence}</b><p>{turn.question}</p><p>{turn.answer}</p>
+     </div>)}
+    </details>
+    <button className="btn primary" onClick={()=>{setSession(null);setStep("setup");setMessage("");setConsent(false);}}>
+     New interview</button>
+   </section>}
+   <details className="panel live-privacy">
+    <summary>Privacy & data</summary>
+    <p className="muted small">Delete stored CV text, interview scenarios, transcripts, and evidence for this account. This also removes offline demo sessions.</p>
+    <button className="btn danger" disabled={busy} onClick={()=>{
+     if(window.prompt("Type DELETE ALL MY INTERVIEW DATA to permanently delete all your scenarios and sessions")!=="DELETE ALL MY INTERVIEW DATA")return;
+     void run(async()=>{await api("/api/me/data",{method:"DELETE",body:JSON.stringify({confirm:"DELETE ALL MY INTERVIEW DATA"})});
+      setScenario(null);setPlan(null);setGeneratedKey(null);setSession(null);setHistory([]);setConsent(false);setStep("setup");
+      setMessage("Your interview data has been deleted.");});
+    }}>Delete my interview data</button>
+   </details>
+  </main>
+ </div>;
 }

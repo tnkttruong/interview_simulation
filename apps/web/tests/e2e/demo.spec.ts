@@ -8,6 +8,8 @@ test("requires latest scenario approval and explicit transcript consent", async 
   await page.getByLabel("Email").fill(unique);
   await page.getByLabel("Password").fill("correct-horse-battery-staple!");
   await page.getByRole("button",{name:"Create account"}).click();
+  await expect(page.getByTestId("live-workspace")).toHaveAttribute("data-hydrated","true");
+  await page.goto("/demo");
   await expect(page.getByRole("heading",{name:"Your interview workspace"})).toBeVisible();
   await expect(page.getByTestId("workspace-shell")).toHaveAttribute("data-hydrated","true");
 
@@ -47,6 +49,8 @@ test("a new meeting requires fresh consent and old session evidence does not lea
   await page.getByLabel("Email").fill(`consent-${Date.now()}@example.test`);
   await page.getByLabel("Password").fill("correct-horse-battery-staple!");
   await page.getByRole("button",{name:"Create account"}).click();
+  await expect(page.getByTestId("live-workspace")).toHaveAttribute("data-hydrated","true");
+  await page.goto("/demo");
   await expect(page.getByTestId("workspace-shell")).toHaveAttribute("data-hydrated","true");
   await page.getByRole("button",{name:"New interview",exact:true}).click();
   await page.getByRole("button",{name:/Create demo scenario/}).click();

@@ -8,7 +8,7 @@ async function signUp(page:import("@playwright/test").Page){
  await page.getByLabel("Email").fill("review-"+randomUUID()+"@example.test");
  await page.getByLabel("Password").fill("correct-horse-battery-staple!");
  await page.getByRole("button",{name:"Create account"}).click();
- await expect(page.getByRole("link",{name:/AI Interview/})).toBeVisible();
+ await expect(page.getByTestId("live-workspace")).toHaveAttribute("data-hydrated","true");
 }
 const speech={interviewerLocale:"en-US",interviewerVoiceId:"en-US-JennyNeural",
  candidateSttLocale:"en-US",consentToTranscript:true};
