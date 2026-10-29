@@ -15,6 +15,7 @@ async function register(page: Page) {
   await page.getByLabel("Email").fill(`policy-${randomUUID()}@example.test`);
   await page.getByLabel("Password").fill("correct-horse-battery-staple!");
   await page.getByRole("button", { name: "Create account" }).click();
+  await page.goto("/demo");
   await expect(page.getByTestId("workspace-shell")).toHaveAttribute("data-hydrated", "true");
 }
 
