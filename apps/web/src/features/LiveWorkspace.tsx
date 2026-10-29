@@ -318,7 +318,7 @@ export default function LiveWorkspace({email}:{email:string}){
        <p style={{whiteSpace:"pre-wrap"}}>{session.nextSuggestedAnswer}</p>
        <p className="muted small">Use this as guidance, not as a claim about your own experience.</p>
       </div>}
-      {hint&&<div className="panel hint"><h3>Private AI coaching hint</h3><p>{hint}</p><p className="muted small">Hint exposure is logged in workflow evidence.</p></div>
+      {hint&&<div className="panel hint"><h3>Private AI coaching hint</h3><p>{hint}</p><p className="muted small">Hint exposure is logged in workflow evidence.</p></div>}
       <div className="panel form-grid"><label>Your answer (speech can be corrected before saving)
        <textarea rows={5} value={answer} maxLength={12000} onChange={e=>{if(!busy){setAnswer(e.target.value);answerKey.current=null;}}}
          disabled={busy||!session?.nextQuestionId||session?.state!=="IN_PROGRESS"}/></label>
