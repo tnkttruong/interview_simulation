@@ -1,8 +1,10 @@
 import {createServer} from "node:http";
 const plan={
  role:"Senior Backend Engineer",level:"Senior",overview:"Focus on production ownership and reliability.",
- stages:[{topic:"Backend architecture",questions:["Explain your service design decisions."]},
-         {topic:"Teamwork",questions:["Describe how you reviewed code."]}],
+ stages:[{topic:"Backend architecture",questions:["Explain your service design decisions."],
+          suggestedAnswers:["I would define explicit service boundaries, clear API contracts, reliable retries, and observability before scaling."]},
+         {topic:"Teamwork",questions:["Describe how you reviewed code."],
+          suggestedAnswers:["A strong review combines correctness, test coverage, maintainability, and constructive feedback to the author."]}],
  rubric:[{competency:"Reliability",criteria:"Uses measurable safeguards and incident lessons."},
          {competency:"Communication",criteria:"Explains tradeoffs clearly."}]
 };
@@ -25,7 +27,8 @@ const server=createServer(async(req,res)=>{
   content.includes("Revise this interview plan")?{...plan,overview:"Revised focus on database incidents."}:
   content.includes("Give brief coaching structure")?{hint:"Describe the challenge, your actions, measured results, and tradeoffs."}:
   {question:"How did you improve database reliability in production?",competency:"Reliability",
-   rationale:"Grounded follow-up on role and historical examples"};
+   rationale:"Grounded follow-up on role and historical examples",
+   suggestedAnswer:"I would diagnose slow queries using production traces, review query plans and indexes, then validate safer migrations and alerting against an agreed latency target."};
  res.end(JSON.stringify({model:"ci-mock-model",choices:[{message:{content:JSON.stringify(result)}}]}));
 });
 server.listen(8787,()=>console.log("Mock LLM ready on 8787"));

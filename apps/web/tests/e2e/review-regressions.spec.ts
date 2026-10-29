@@ -32,7 +32,9 @@ test("concurrent AI creation is charged once, demo cannot revise live plan, list
  expect(demoRevise.status()).toBe(400);
  const plan=await page.request.get("/api/live/scenarios/"+created.id);
  expect(plan.status()).toBe(200);
- expect((await plan.json()).scenario.latestRevision).toBe(1);
+ const planned=(await plan.json()) as {scenario:{latestRevision:number};plan:{stages:{questions:string[];suggestedAnswers?:string[]}[]}};
+ expect(planned.scenario.latestRevision).toBe(1);
+ expect(planned.plan.stages[0]?.suggestedAnswers?.length).toBe(planned.plan.stages[0]?.questions.length);
  const beforeRevise=await counts(page);
  const revisions=await Promise.all(Array.from({length:5},()=>
   page.request.post("/api/live/scenarios/"+created.id+"/revise",{
@@ -59,6 +61,7 @@ test("concurrent AI creation is charged once, demo cannot revise live plan, list
  expect((await counts(page)).question-beforeQuestion.question).toBe(1);
  const current=await (await page.request.get("/api/demo/sessions/"+session.id)).json();
  expect(current.nextQuestionId).toBeTruthy();
+ expect(current.nextSuggestedAnswer).toContain("production traces");
  const beforeHint=await counts(page);
  const h=await Promise.all(Array.from({length:5},()=>page.request.post("/api/live/sessions/"+session.id+"/hint")));
  expect(h.every(r=>[200,409].includes(r.status()))).toBe(true);

@@ -5,10 +5,11 @@ import {voiceByLocale} from "@interview/core";
 import {checkMicrophone,checkSpeaker,listen,say,type SpeechCredential} from "./azure-client";
 import {extractPdf} from "./pdf-client";
 type Locale=keyof typeof voiceByLocale;
-type Plan={role:string;level:string;overview:string;stages:{topic:string;questions:string[]}[];rubric:{competency:string;criteria:string}[]};
+type Plan={role:string;level:string;overview:string;stages:{topic:string;questions:string[];suggestedAnswers?:string[]}[];rubric:{competency:string;criteria:string}[]};
 type Scenario={id:string;role:string;jobDescription:string;focus:string;latestRevision:number;revisions:{revision:number;approvedAt:number|null;notes:string}[]};
 type Turn={id:string;sequence:number;question:string;answer:string;answerSource:string;originalStt:string|null};
 type Session={id:string;mode:string;state:string;version:number;nextQuestion:string|null;nextQuestionId:string|null;
+  nextSuggestedAnswer:string|null;
   turns:Turn[];speechConfig:string};
 type Catalog={enabled:boolean;voices:Record<string,string[]>};
 const locales:{key:Locale,label:string}[]=[
@@ -32,6 +33,7 @@ export default function LiveWorkspace({email}:{email:string}){
  const [consent,setConsent]=useState(false),[textOnly,setTextOnly]=useState(false),[micOk,setMicOk]=useState(false);
  const [speakerOk,setSpeakerOk]=useState(false),[session,setSession]=useState<Session|null>(null);
  const [answer,setAnswer]=useState(""),[recognized,setRecognized]=useState(""),[hint,setHint]=useState("");
+ const [showSuggestedAnswer,setShowSuggestedAnswer]=useState(false);
  const [busy,setBusy]=useState(false),[message,setMessage]=useState(""),[error,setError]=useState("");
  const [history,setHistory]=useState<{id:string;state:string;mode:string;createdAt:number}[]>([]);
  const startKey=useRef<string|null>(null),answerKey=useRef<string|null>(null);
@@ -111,7 +113,7 @@ export default function LiveWorkspace({email}:{email:string}){
  }
  async function readQuestion(s:Session){
   const next=await api<Session>("/api/live/sessions/"+s.id+"/question",{method:"POST"});
-  setSession(next);setHint("");setRecognized("");setAnswer("");answerKey.current=null;
+  setSession(next);setHint("");setShowSuggestedAnswer(false);setRecognized("");setAnswer("");answerKey.current=null;
   return next;
  }
  async function previewSelectedVoice(){
@@ -156,6 +158,7 @@ export default function LiveWorkspace({email}:{email:string}){
  async function continueSession(id:string){
   await run(async()=>{
    const selected=await refreshSession(id);
+   setShowSuggestedAnswer(false);setHint("");
    const config=JSON.parse(selected.speechConfig);
    setInterviewerLocale(config.interviewerLocale);setCandidateLocale(config.candidateSttLocale);
    setVoice(config.interviewerVoiceId);setTextOnly(true);
@@ -167,7 +170,7 @@ export default function LiveWorkspace({email}:{email:string}){
   await run(async()=>{
    const next=await api<Session>("/api/demo/sessions/"+session.id,{method:"PATCH",
     body:JSON.stringify({action:kind,expectedVersion:session.version})});
-   setSession(next);
+   setSession(next);setShowSuggestedAnswer(false);
    if(kind==="finish")setStep("results");
   });
  }
@@ -181,7 +184,7 @@ export default function LiveWorkspace({email}:{email:string}){
     ...(recognized?{originalStt:recognized}:{})};
    try{
     const updated=await api<Session>("/api/demo/sessions/"+session.id+"/turns",{method:"POST",body:JSON.stringify(body)});
-    setSession(updated);answerKey.current=null;setHint("");setAnswer("");setRecognized("");
+    setSession(updated);answerKey.current=null;setHint("");setShowSuggestedAnswer(false);setAnswer("");setRecognized("");
     if(updated.turns.length<15)await readQuestion(updated);
     else setMessage("15-turn limit reached; finish to review the transcript.");
    }catch(e){
@@ -255,7 +258,10 @@ export default function LiveWorkspace({email}:{email:string}){
       {!plan?<p>Generate a scenario first.</p>:<>
        <h3>{plan.role} · {plan.level}</h3><p>{plan.overview}</p>
        {plan.stages.map((s,i)=><div key={i}><h3>{i+1}. {s.topic}</h3>
-        <ol>{s.questions.map((q,j)=><li key={j}>{q}</li>)}</ol></div>)}
+        <ol>{s.questions.map((q,j)=><li key={j}>{q}
+         {s.suggestedAnswers?.[j]&&<details><summary>Suggested answer</summary>
+          <p style={{whiteSpace:"pre-wrap"}}>{s.suggestedAnswers[j]}</p></details>}
+        </li>)}</ol></div>)}
        <h3>Evaluation rubric</h3><ul>{plan.rubric.map((rub,i)=><li key={i}><b>{rub.competency}:</b> {rub.criteria}</li>)}</ul>
        <button className="btn primary" onClick={approve} disabled={busy||!scenario}>Approve this revision →</button>
       </>}
@@ -299,12 +305,20 @@ export default function LiveWorkspace({email}:{email:string}){
         onClick={()=>session&&run(async()=>{await readQuestion(session);})}>Generate question</button>
        <button className="btn secondary" disabled={busy||textOnly||!session?.nextQuestion||session?.state!=="IN_PROGRESS"} onClick={speak}>▶ Speak question</button>
        <button className="btn secondary" disabled={busy||textOnly||!session?.nextQuestion||session?.state!=="IN_PROGRESS"} onClick={record}>🎙 Speak answer</button>
+       <button className="btn secondary" disabled={!session?.nextSuggestedAnswer||session?.state!=="IN_PROGRESS"}
+        aria-pressed={showSuggestedAnswer} onClick={()=>setShowSuggestedAnswer(value=>!value)}>
+         {showSuggestedAnswer?"Hide suggested answer":"Show suggested answer"}</button>
        <button className="btn secondary" disabled={busy||!session?.nextQuestion||session?.state!=="IN_PROGRESS"} onClick={hintForQuestion}>💡 Private hint</button>
        {session?.state==="IN_PROGRESS"?<button className="btn secondary" onClick={()=>action("pause")} disabled={busy}>Pause</button>:
         <button className="btn secondary" onClick={()=>action("resume")} disabled={busy||!["PAUSED","INTERRUPTED"].includes(session?.state||"")}>Resume</button>}
        <button className="btn danger" onClick={()=>action("finish")} disabled={busy||!["PAUSED","INTERRUPTED","IN_PROGRESS"].includes(session?.state||"")}>Finish</button>
       </div>
-      {hint&&<div className="panel hint"><h3>Private AI coaching hint</h3><p>{hint}</p><p className="muted small">Hint exposure is logged in workflow evidence.</p></div>}
+      {showSuggestedAnswer&&session?.nextSuggestedAnswer&&<div className="panel hint" data-testid="suggested-answer">
+       <h3>Suggested answer · practice reference</h3>
+       <p style={{whiteSpace:"pre-wrap"}}>{session.nextSuggestedAnswer}</p>
+       <p className="muted small">Use this as guidance, not as a claim about your own experience.</p>
+      </div>}
+      {hint&&<div className="panel hint"><h3>Private AI coaching hint</h3><p>{hint}</p><p className="muted small">Hint exposure is logged in workflow evidence.</p></div>
       <div className="panel form-grid"><label>Your answer (speech can be corrected before saving)
        <textarea rows={5} value={answer} maxLength={12000} onChange={e=>{if(!busy){setAnswer(e.target.value);answerKey.current=null;}}}
          disabled={busy||!session?.nextQuestionId||session?.state!=="IN_PROGRESS"}/></label>

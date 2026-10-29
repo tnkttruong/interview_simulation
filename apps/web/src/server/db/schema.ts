@@ -106,6 +106,7 @@ export const liveQuestions = sqliteTable("live_questions",{
   sessionId:text("session_id").notNull().references(()=>interviewSessions.id,{onDelete:"cascade"}),
   sequence:integer("sequence").notNull(),
   question:text("question").notNull(),
+  suggestedAnswer:text("suggested_answer").notNull().default(""),
   competency:text("competency").notNull(),
   modelId:text("model_id").notNull(),
   promptVersion:text("prompt_version").notNull(),
