@@ -63,7 +63,7 @@ it("reruns migrations after restart without losing persisted interview data", ()
       expect(reopened.prepare("SELECT job_description, cv_text, cv_filename FROM live_session_sources").get())
         .toEqual({job_description:"Original JD at meeting start",
           cv_text:"Original CV text for cloned meeting",cv_filename:"candidate.txt"});
-      reopened.prepare("DELETE FROM interview_sessions WHERE id=?").run(sessionId);
+      reopened.prepare("DELETE FROM interview_sessions").run();
       expect((reopened.prepare("SELECT COUNT(*) AS count FROM live_session_sources").get() as {count:number}).count).toBe(0);
     } finally {
       reopened.close();
