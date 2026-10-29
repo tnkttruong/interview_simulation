@@ -148,6 +148,8 @@ export default function LiveWorkspace({email}:{email:string}){
     speech:{interviewerLocale,interviewerVoiceId:voice,candidateSttLocale:candidateLocale,consentToTranscript:true}
    })});
    setSession(started);setStep("meeting");startKey.current=null;credential.current=null;
+   setHistory(previous=>[{id:started.id,mode:started.mode,state:started.state,createdAt:Date.now()},
+    ...previous.filter(item=>item.id!==started.id)]);
    const next=await readQuestion(started);
    setMessage(next.nextQuestion?"Your AI interviewer is ready.":"Interview started. Select Generate question to retry.");
   });
@@ -173,6 +175,7 @@ export default function LiveWorkspace({email}:{email:string}){
    const next=await api<Session>("/api/demo/sessions/"+session.id,{method:"PATCH",
     body:JSON.stringify({action:kind,expectedVersion:session.version})});
    setSession(next);setShowSuggestedAnswer(false);
+   setHistory(previous=>previous.map(item=>item.id===next.id?{...item,state:next.state}:item));
    if(kind==="finish")setStep("results");
   });
  }
