@@ -37,6 +37,9 @@ it("reruns migrations after restart without losing persisted interview data", ()
           interviewerLocale: "vi-VN", interviewerVoiceId: "vi-VN-HoaiMyNeural",
           candidateSttLocale: "en-US", consentToTranscript: true
         }), "IN_PROGRESS", 4, timestamp);
+      db.prepare("INSERT INTO live_session_sources(session_id,role,job_description,focus,cv_text,cv_filename,created_at) VALUES (?,?,?,?,?,?,?)")
+        .run(sessionId, "Engineer", "Original JD at meeting start", "SQL",
+          "Original CV text for cloned meeting", "candidate.txt", timestamp);
       db.prepare("INSERT INTO interview_turns(id,session_id,client_turn_id,sequence,question,answer,answer_source,original_stt,created_at) VALUES (?,?,?,?,?,?,?,?,?)")
         .run(randomUUID(), sessionId, randomUUID(), 1, "Xin chào", "Hello", "typed", null, timestamp);
       db.prepare("INSERT INTO workflow_events(id,session_id,seq,type,metadata,timestamp) VALUES (?,?,?,?,?,?)")
@@ -48,7 +51,7 @@ it("reruns migrations after restart without losing persisted interview data", ()
     migrate();
     const reopened = new Database(path);
     try {
-      expect((reopened.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as {count:number}).count).toBe(5);
+      expect((reopened.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as {count:number}).count).toBe(6);
       expect((reopened.prepare("SELECT COUNT(*) AS count FROM interview_turns").get() as {count:number}).count).toBe(1);
       expect((reopened.prepare("SELECT COUNT(*) AS count FROM workflow_events").get() as {count:number}).count).toBe(1);
       expect((reopened.prepare("SELECT COUNT(*) AS count FROM live_questions").get() as {count:number}).count).toBe(0);
@@ -57,6 +60,11 @@ it("reruns migrations after restart without losing persisted interview data", ()
       expect((reopened.prepare("SELECT COUNT(*) AS count FROM scenario_plans").get() as {count:number}).count).toBe(0);
       expect(reopened.prepare("SELECT question, answer FROM interview_turns").get())
         .toEqual({question:"Xin chào",answer:"Hello"});
+      expect(reopened.prepare("SELECT job_description, cv_text, cv_filename FROM live_session_sources").get())
+        .toEqual({job_description:"Original JD at meeting start",
+          cv_text:"Original CV text for cloned meeting",cv_filename:"candidate.txt"});
+      reopened.prepare("DELETE FROM interview_sessions WHERE id=?").run(sessionId);
+      expect((reopened.prepare("SELECT COUNT(*) AS count FROM live_session_sources").get() as {count:number}).count).toBe(0);
     } finally {
       reopened.close();
     }
