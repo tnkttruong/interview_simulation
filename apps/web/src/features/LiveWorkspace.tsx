@@ -44,7 +44,7 @@ export default function LiveWorkspace({email}:{email:string}){
  const inputKey=JSON.stringify({role,jd,focus,cvText,cvName});
  const planCurrent=!!scenario&&!!plan&&generatedKey===inputKey;
  const questionCount=plan?.stages.reduce((total,stage)=>total+stage.questions.length,0)??0;
- const textOnly=voiceMode==="typed"||(voiceMode==="auto"&&!catalog?.enabled);
+ const textOnly=voiceMode==="typed"||(voiceMode==="auto"&&(!catalog?.enabled||!visibleVoices.includes(voice)));
  useEffect(()=>{
   fetch("/api/me/ai-settings",{cache:"no-store"}).then(x=>x.json()).then((d:{settings?:{interviewerLocale:Locale;candidateSttLocale:Locale;voiceId:string}})=>{
    if(d.settings){setInterviewerLocale(d.settings.interviewerLocale);setCandidateLocale(d.settings.candidateSttLocale);setVoice(d.settings.voiceId);}
@@ -227,7 +227,6 @@ export default function LiveWorkspace({email}:{email:string}){
    <strong>◉ Interview Simulation</strong>
    <nav aria-label="App navigation">
     <Link href="/settings">AI Settings</Link>
-    <Link href="/">Offline demo</Link>
     <small>{email}</small>
    </nav>
   </header>
