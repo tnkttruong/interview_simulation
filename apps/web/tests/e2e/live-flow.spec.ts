@@ -6,7 +6,6 @@ test("Simple flow: JD + CV, generated script, direct meeting, hint and deletion"
  await page.getByLabel("Email").fill("live-flow-"+Date.now()+"@example.test");
  await page.getByLabel("Password").fill("correct-horse-battery-staple!");
  await page.getByRole("button",{name:"Create account"}).click();
- await page.goto("/live");
  await expect(page.getByTestId("live-workspace")).toHaveAttribute("data-hydrated","true");
  await page.getByLabel("Job description").fill("Build resilient data services, respond to database incidents and mentor engineers");
  await page.getByLabel("Or paste/edit CV text").fill("I worked on Node.js services, PostgreSQL reliability and on-call response.");
