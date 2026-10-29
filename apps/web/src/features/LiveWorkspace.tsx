@@ -428,7 +428,7 @@ export default function LiveWorkspace({email}:{email:string}){
       <b>Q{turn.sequence}</b><p>{turn.question}</p><p>{turn.answer}</p>
      </div>)}
     </details>
-    <button className="btn primary" onClick={()=>{setSession(null);setStep("setup");setMessage("");}}>
+    <button className="btn primary" onClick={()=>{setSession(null);setStep("setup");setMessage("");setConsent(false);}}>
      New interview</button>
    </section>}
    <details className="panel live-privacy">
