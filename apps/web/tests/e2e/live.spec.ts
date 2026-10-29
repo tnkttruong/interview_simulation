@@ -20,11 +20,11 @@ test("offline workspace links to live interview",async({page})=>{
  await page.getByLabel("Email").fill("live-"+Date.now()+"@example.test");
  await page.getByLabel("Password").fill("correct-horse-battery-staple!");
  await page.getByRole("button",{name:"Create account"}).click();
- await expect(page.getByRole("link",{name:/AI Interview/})).toBeVisible();
- await page.getByRole("link",{name:/AI Interview/}).click();
  await expect(page.getByRole("heading",{name:"Practice a real interview with AI"})).toBeVisible();
  await expect(page.getByTestId("live-workspace")).toHaveAttribute("data-hydrated","true");
- await page.getByRole("button",{name:"3. preflight"}).click();
- await expect(page.getByLabel("AI interviewer language")).toBeVisible();
- await expect(page.getByRole("button",{name:/Start AI meeting/})).toBeDisabled();
+ await expect(page.getByRole("navigation",{name:"Interview steps"})).toHaveCount(0);
+ await expect(page.getByLabel("Job description")).toBeVisible();
+ await expect(page.getByLabel("Or paste/edit CV text")).toBeVisible();
+ await expect(page.getByRole("button",{name:"Generate AI interview scenario"})).toBeDisabled();
+ await expect(page.getByRole("button",{name:/Start AI meeting/})).toHaveCount(0);
 });

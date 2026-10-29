@@ -1,5 +1,7 @@
 # UI / UX Screen Specification — Interview Simulation
 
+> **Historical P0 nine-screen storyboard.** The live AI interview UI now uses the streamlined JD/CV → generated script → meeting journey documented in [SIMPLIFIED_LIVE_FLOW.md](./SIMPLIFIED_LIVE_FLOW.md). The legacy P0 demo remains at `/demo`; the old preflight/approval screen descriptions below do not apply to `/live`.
+
 **Status:** UX blueprint and working offline P0 demo; live AI/speech remain future work  
 **Approved architecture:** pnpm, Next.js full-stack, SQLite/Drizzle, Azure Speech, pluggable LLM; see [technical architecture](../TECHNICAL_ARCHITECTURE.md) in this same PR.  
 **Artifacts:** [Nine-screen storyboard](./mockups-overview.svg) | [Interactive static prototype](./prototype.html) (open in browser locally)

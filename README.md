@@ -2,7 +2,7 @@
 
 Open-source, self-hosted mock interview web application.
 
-**Current phase: P0 offline demo plus experimental P1–P3 live interview in /live.** P0 requires no paid keys. Live mode supports CV/JD-driven planning, revision/approval, Azure Speech STT/TTS, follow-up questions and optional hints; it needs your LLM/Azure credentials. Production cloud interoperability has not yet been validated with real subscriptions. P4 scoring and independent audit ZIP are not implemented.
+**Default experience: a simplified AI interview at `/live` (also opened from `/`). The original P0 offline demo is available at `/demo`.** P0 requires no paid keys. Live mode supports CV/JD-driven planning, inline revisions, automatic server-side approval on Start, Azure Speech STT/TTS, follow-up questions and optional hints; it needs your LLM/Azure credentials. Production cloud interoperability has not yet been validated with real subscriptions. P4 scoring and independent audit ZIP are not implemented.
 
 ## Architecture
 
@@ -11,7 +11,7 @@ Open-source, self-hosted mock interview web application.
 - Single-process SQLite (WAL) with Drizzle ORM, Better Auth local accounts
 - No database service, queues, microservices, paid AI keys or WebRTC required to try the demo
 
-See [Technical Architecture](docs/TECHNICAL_ARCHITECTURE.md), [P0 delivery plan](docs/plans/P0_FOUNDATION_IMPLEMENTATION_PLAN.md), [UI screen specification](docs/ui/SCREEN_SPEC.md), [SVG storyboard](docs/ui/mockups-overview.svg) and [offline clickable prototype](docs/ui/prototype.html).
+See the [simplified live interview flow](docs/ui/SIMPLIFIED_LIVE_FLOW.md), [Technical Architecture](docs/TECHNICAL_ARCHITECTURE.md), [P0 delivery plan](docs/plans/P0_FOUNDATION_IMPLEMENTATION_PLAN.md), [UI screen specification](docs/ui/SCREEN_SPEC.md), [SVG storyboard](docs/ui/mockups-overview.svg) and [offline clickable prototype](docs/ui/prototype.html).
 
 ## Local quickstart
 
@@ -27,7 +27,7 @@ pnpm db:migrate
 pnpm dev
 ```
 
-Open http://localhost:3000, create a local demo account and follow the screens. Existing scenario revisions and typed answers persist after a refresh or server restart.
+Open http://localhost:3000, sign in, add a JD and CV, generate an AI script and press **Start AI meeting**. AI calls require a configured provider. The offline P0 flow remains at http://localhost:3000/demo and needs no paid keys. Existing scenario revisions and typed answers persist after a refresh or server restart.
 
 **Lockfile:** `pnpm-lock.yaml` is committed. CI should use `pnpm install --frozen-lockfile` with read-only repository permissions and no cloud secrets.
 
@@ -45,7 +45,7 @@ One container serves Next and SQLite. `interview_data` named volume is persisten
 
 Create scenario from JD → revise and explicitly approve the latest immutable version → set AI spoken language and voice independently of candidate input/STT language → explicitly consent to storing transcript → Start → answer by text → pause/resume/end → inspect history/events. The preflight mic and voice preview are *mock buttons*; neither asks browser permission nor records audio. Typed answers are durable and requests have idempotency keys; reusing a key with a different answer returns HTTP 409. P0 emits `preflight.demo_skipped` instead of claiming a real microphone check passed. Scripted interviewer question text respects the selected language (English or Vietnamese), while the candidate input locale remains independent. Each demo session accepts at most 15 answers.
 
-**Live P1–P3:** Set `OPENAI_API_KEY` and `AI_MODEL` (OpenAI-compatible JSON-mode Chat Completions; optional `LLM_BASE_URL`). Set `AZURE_SPEECH_REGION` and `AZURE_SPEECH_KEY` to enable browser voice; otherwise select text-only fallback. Open `/live`, upload CV PDF/DOCX/TXT/MD or paste text, generate/revise/approve a plan and start. PDF is extracted locally in browser via pinned PDF.js; DOCX is parsed server-side in memory. Scanned PDFs require OCR externally. The model receives extracted CV text and JD; Azure receives voice audio when enabled. No raw audio is stored here. P4 evaluation and audit ZIP are still pending.
+**Live P1–P3:** Set `OPENAI_API_KEY` and `AI_MODEL` (OpenAI-compatible JSON-mode Chat Completions; optional `LLM_BASE_URL`). Set `AZURE_SPEECH_REGION` and `AZURE_SPEECH_KEY` to enable browser voice; otherwise select text-only fallback. Open `/live` (the signed-in default), upload CV PDF/DOCX/TXT/MD or paste text, generate a plan and press **Start AI meeting**. The UI approves the latest revision automatically; optional plan preview, revision and language/voice preferences stay collapsed on the same setup page. If Azure is absent, typed mode is selected automatically. PDF is extracted locally in browser via pinned PDF.js; DOCX is parsed server-side in memory. Scanned PDFs require OCR externally. The model receives extracted CV text and JD; Azure receives voice audio when enabled. No raw audio is stored here. P4 evaluation and audit ZIP are still pending.
 
 ## Privacy and security
 
@@ -57,7 +57,7 @@ Licensed under [Apache-2.0](LICENSE). Feature contributions and tests are welcom
 
 ## AI provider and language preferences
 
-Sign in and open **/settings**. This account-owned page stores an AI provider, model, default interviewer language/voice, and default candidate speech language in SQLite. Saved preferences drive live scenario planning, revisions, questions and hints. The meeting preflight initializes the saved language/voice defaults; you can override them per meeting. The offline P0 demo does not call AI.
+Sign in and open **/settings**. This account-owned page stores an AI provider, model, default interviewer language/voice, and default candidate speech language in SQLite. Saved preferences drive live scenario planning, revisions, questions and hints. The streamlined meeting starts with saved language/voice defaults; you can override them under optional meeting preferences on the setup page. The offline P0 demo does not call AI.
 
 ### CLI-first, operator opt-in
 

@@ -95,6 +95,7 @@ return withAiBudget(ownerId,{"action":"question","sessionId":id,"sequence":seque
   if(previous)return;
   tx.insert(liveQuestions).values({id:randomUUID(),sessionId:id,sequence,
     question:generated.output.question,competency:generated.output.competency,
+    suggestedAnswer:generated.output.suggestedAnswer,
     modelId:generated.modelId,promptVersion,createdAt:Date.now()}).run();
   event(tx as unknown as typeof db,id,"question.prepared",{sequence,modelId:generated.modelId,promptVersion});
  });
