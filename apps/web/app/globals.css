@@ -92,3 +92,16 @@ footer{font-size:12px;color:#7a8496;padding:35px 0;text-align:center}.auth-page{
  .live-meeting-heading{align-items:start}
  .live-meeting .meeting-video{min-height:220px}
 }
+
+/* Prior meetings: keep resume, clone and details usable at narrow widths. */
+.prior-session-row{display:flex;align-items:center;gap:10px;border-bottom:1px solid #e9edf6;padding:8px 0}
+.prior-session-row .list-button{flex:1;min-width:0;width:auto;text-align:left;border-bottom:0;overflow-wrap:anywhere}
+.prior-session-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+.prior-session-actions .btn{white-space:nowrap;font-size:12px;padding:9px 11px}
+.prior-session-actions a{color:#555ddb;font-size:13px;text-decoration:none;white-space:nowrap;padding:8px}
+.prior-session-actions a:hover{text-decoration:underline}
+@media(max-width:760px){
+ .prior-session-row{align-items:flex-start;flex-wrap:wrap}
+ .prior-session-row .list-button{flex-basis:100%}
+ .prior-session-actions{justify-content:flex-start;padding-left:9px}
+}
