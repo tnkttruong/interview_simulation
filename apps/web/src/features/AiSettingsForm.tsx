@@ -40,6 +40,7 @@ export default function AiSettingsForm({email}:{email:string}){
    <div className="side-caption">ACCOUNT SETTINGS</div>
    <nav aria-label="Workspace navigation">
     <Link className="live-entry" href="/live">✦ AI Interview →</Link>
+    <Link className="live-entry" href="/settings/test">🧪 Test providers →</Link>
     <Link className="live-entry" href="/">← Offline demo</Link>
    </nav>
    <div className="sidebar-bottom">AI CLI runs on your own server. Install and authenticate it as the server operator.</div>
