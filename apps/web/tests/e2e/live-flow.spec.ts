@@ -13,7 +13,7 @@ test("P1-P3: AI plan, revision approval, typed live interview, hint and deletion
  await page.getByRole("button",{name:"Generate AI interview scenario"}).click();
  await expect(page.getByText("Focus on production ownership and reliability.")).toBeVisible();
  const plannedAnswer="I would define explicit service boundaries, clear API contracts, reliable retries, and observability before scaling.";
- await expect(page.getByText(plannedAnswer)).toHaveCount(0);
+ await expect(page.getByText(plannedAnswer)).toBeHidden();
  await page.getByText("Suggested answer",{exact:true}).first().click();
  await expect(page.getByText(plannedAnswer)).toBeVisible();
  await page.getByLabel("Revision request").fill("Focus more on real database incidents");
