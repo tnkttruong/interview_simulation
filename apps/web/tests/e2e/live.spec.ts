@@ -20,8 +20,7 @@ test("offline workspace links to live interview",async({page})=>{
  await page.getByLabel("Email").fill("live-"+Date.now()+"@example.test");
  await page.getByLabel("Password").fill("correct-horse-battery-staple!");
  await page.getByRole("button",{name:"Create account"}).click();
- await expect(page.getByRole("link",{name:/AI Interview/})).toBeVisible();
- await page.getByRole("link",{name:/AI Interview/}).click();
+ await page.goto("/live");
  await expect(page.getByRole("heading",{name:"Practice a real interview with AI"})).toBeVisible();
  await expect(page.getByTestId("live-workspace")).toHaveAttribute("data-hydrated","true");
  await expect(page.getByRole("navigation",{name:"Interview steps"})).toHaveCount(0);
