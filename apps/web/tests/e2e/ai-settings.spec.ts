@@ -11,7 +11,7 @@ test("account saves and reloads AI provider/model/language preferences",async({p
  await page.getByLabel("Email").fill("settings-"+Date.now()+"@example.test");
  await page.getByLabel("Password").fill("correct-horse-battery-staple!");
  await page.getByRole("button",{name:"Create account"}).click();
- await expect(page.getByRole("link",{name:/AI Interview/})).toBeVisible();
+ await expect(page.getByTestId("live-workspace")).toHaveAttribute("data-hydrated","true");
  await page.goto("/settings");
  await expect(page.getByRole("heading",{name:"AI settings"})).toBeVisible();
  await page.getByLabel("AI provider").selectOption("api_key");
@@ -25,7 +25,12 @@ test("account saves and reloads AI provider/model/language preferences",async({p
  await expect(page.getByLabel("Default interviewer language")).toHaveValue("vi-VN");
  await page.goto("/live");
  await expect(page.getByTestId("live-workspace")).toHaveAttribute("data-hydrated","true");
- await page.getByRole("button",{name:"3. preflight"}).click();
+ await page.getByLabel("Job description").fill("Build scalable backend systems and maintain production APIs.");
+ await page.getByLabel("Or paste/edit CV text").fill("I have experience developing backend APIs and reviewing database performance.");
+ await page.getByRole("button",{name:"Generate AI interview scenario"}).click();
+ await expect(page.getByTestId("generated-script")).toBeVisible();
+ await page.getByText("Meeting preferences (optional)").click();
  await expect(page.getByLabel("AI interviewer language")).toHaveValue("vi-VN");
- await expect(page.getByLabel("Your spoken input language")).toHaveValue("en-GB");
+ const saved=await (await page.request.get("/api/me/ai-settings")).json() as {settings:{candidateSttLocale:string}};
+ expect(saved.settings.candidateSttLocale).toBe("en-GB");
 });
