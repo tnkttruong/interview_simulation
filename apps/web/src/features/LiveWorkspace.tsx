@@ -645,9 +645,10 @@ export default function LiveWorkspace({email}:{email:string}){
                <ol>{stage.questions.map((q,j)=>{
                 const item=stage.items?.[j];
                 return <li key={j} className="flow-script-item">
-                 <span className="flow-script-badge">{item?.type==="interactive"?"Interactive scenario":"Standalone"}</span>
+                 <span className="flow-script-badge">{!item?"Legacy adaptive":item.type==="interactive"?"Interactive scenario":"Standalone"}</span>
                  <div><strong>{q}</strong></div>
-                 {item?.type==="interactive"?<>
+                 {!item?<p className="muted small">Old script: AI may generate follow-up questions; sequence is not guaranteed.</p>
+                 :item.type==="interactive"?<>
                   <p className="muted small">Goal: {item.goal}</p>
                   <p className="muted small">AI follow-ups: max {item.maxFollowUps}. Complete when: {item.completionCriteria}</p>
                  </>:<p className="muted small">One answer → next scripted question</p>}
