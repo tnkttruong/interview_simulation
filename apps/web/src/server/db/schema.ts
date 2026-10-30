@@ -118,6 +118,7 @@ export const liveQuestions = sqliteTable("live_questions",{
   sequence:integer("sequence").notNull(),
   question:text("question").notNull(),
   suggestedAnswer:text("suggested_answer").notNull().default(""),
+  fullAnswer:text("full_answer").notNull().default(""),
   itemIndex:integer("item_index").notNull().default(-1),
   questionType:text("question_type").notNull().default("legacy"),
   followUpDepth:integer("follow_up_depth").notNull().default(0),
