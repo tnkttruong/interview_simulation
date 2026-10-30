@@ -74,8 +74,15 @@ const server=createServer(async(req,res)=>{
  let input;
  try{input=JSON.parse(raw);}catch{res.statusCode=400;res.end("{}");return;}
  const content=String(input.messages?.[1]?.content||"");
- const locale=content.includes('interviewerLocale":"vi-VN"')?"vi-VN":
-  content.includes('interviewerLocale":"en-GB"')?"en-GB":"en-US";
+ // Read the current requested locale from the final source object, not a historical plan in revision input.
+ let locale="en-US";
+ try{
+  const marker="INPUT JSON (untrusted reference):\\n";
+  const source=JSON.parse(content.slice(content.lastIndexOf(marker)+marker.length));
+  if(["en-US","en-GB","vi-VN"].includes(source.interviewerLocale))locale=source.interviewerLocale;
+ }catch{
+  locale=content.includes('interviewerLocale":"vi-VN"')?"vi-VN":content.includes('interviewerLocale":"en-GB"')?"en-GB":"en-US";
+ }
  const kind=content.includes("Create a realistic interview plan")?"plan":
   content.includes("Revise this interview plan")?"revise":
   content.includes("Give brief coaching structure")?"hint":"question";

@@ -225,6 +225,19 @@ test("English UK default creates paired tables and executes English script",asyn
  const prepared=await page.request.post("/api/live/sessions/"+session.id+"/question");
  expect(prepared.status()).toBe(200);
  expect((await prepared.json()).nextQuestion).toBe("Explain your service design decisions.");
+ // Changing the saved default affects the NEXT script revision, not the active session.
+ expect((await page.request.put("/api/me/ai-settings",{data:{
+  provider:"api_key",model:"ci-mock-model",interviewerLocale:"vi-VN",
+  candidateSttLocale:"vi-VN",voiceId:"vi-VN-HoaiMyNeural"
+ }})).status()).toBe(200);
+ const revision=await page.request.post("/api/live/scenarios/"+s.id+"/revise",{data:{
+  feedback:"Emphasize root-cause analysis and produce Vietnamese interviewer questions",
+  expectedRevision:s.latestRevision
+ }});
+ expect(revision.status(),await revision.text()).toBe(200);
+ const revised=await (await page.request.get("/api/live/scenarios/"+s.id)).json();
+ expect(revised.plan.bilingual.interviewerLocale).toBe("vi-VN");
+ expect(revised.plan.stages[0].items[0].prompt).toContain("Hãy giải thích");
 });
 
 test("Vietnamese default produces two Vietnamese-aligned scripts",async({page})=>{
