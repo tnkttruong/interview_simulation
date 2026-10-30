@@ -19,7 +19,7 @@ test("requires latest scenario approval and explicit transcript consent", async 
   await expect(page.getByRole("heading",{name:"Review & approve"})).toBeVisible();
 
   await page.getByRole("button",{name:/Language & voice/}).first().click();
-  await expect(page.getByRole("button",{name:"Start meeting →"})).toBeDisabled();
+  await expect(page.getByRole("button",{name:"Start Demo meeting →"})).toBeDisabled();
 
   // Output locale must NOT alter candidate STT locale.
   await expect(page.getByLabel("Your microphone input language")).toHaveValue("vi-VN");
@@ -29,17 +29,17 @@ test("requires latest scenario approval and explicit transcript consent", async 
 
   await page.getByRole("button",{name:"Scenario review"}).first().click();
   await page.getByRole("button",{name:/Approve latest revision/}).click();
-  await expect(page.getByRole("button",{name:"Start meeting →"})).toBeDisabled();
+  await expect(page.getByRole("button",{name:"Start Demo meeting →"})).toBeDisabled();
   await page.getByRole("checkbox",{name:/explicitly consent/}).check();
-  await page.getByRole("button",{name:"Start meeting →"}).click();
+  await page.getByRole("button",{name:"Start Demo meeting →"}).click();
 
   await expect(page.getByRole("heading",{name:/Senior Backend Engineer/})).toBeVisible();
   await page.getByLabel("Type answer (STT fallback / offline demo)").fill("I reviewed the explain plan.");
   await page.getByRole("button",{name:"✓ Finish answer"}).click();
   await expect(page.getByText("I reviewed the explain plan.")).toBeVisible();
   await page.reload();
-  // Homepage shows persisted session; resume through history.
-  await expect(page.getByText(/Sessions/).first()).toBeVisible();
+  // The same session and recorded answer survive a reload at /demo.
+  await expect(page.getByText("I reviewed the explain plan.")).toBeVisible();
 });
 
 test("a new meeting requires fresh consent and old session evidence does not leak", async ({page}) => {
@@ -56,7 +56,7 @@ test("a new meeting requires fresh consent and old session evidence does not lea
   await page.getByRole("button",{name:/Create demo scenario/}).click();
   await page.getByRole("button",{name:/Approve latest revision/}).click();
   await page.getByRole("checkbox",{name:/explicitly consent/}).check();
-  await page.getByRole("button",{name:"Start meeting →"}).click();
+  await page.getByRole("button",{name:"Start Demo meeting →"}).click();
   await page.getByLabel("Type answer (STT fallback / offline demo)").fill("Question 1 answer");
   await page.getByRole("button",{name:"✓ Finish answer"}).click();
   await page.getByRole("button",{name:"End interview"}).click();
@@ -68,9 +68,9 @@ test("a new meeting requires fresh consent and old session evidence does not lea
   await page.getByRole("button",{name:"Continue to preflight"}).click();
   const consent=page.getByRole("checkbox",{name:/explicitly consent/});
   await expect(consent).not.toBeChecked();
-  await expect(page.getByRole("button",{name:"Start meeting →"})).toBeDisabled();
+  await expect(page.getByRole("button",{name:"Start Demo meeting →"})).toBeDisabled();
   await consent.check();
-  await page.getByRole("button",{name:"Start meeting →"}).click();
+  await page.getByRole("button",{name:"Start Demo meeting →"}).click();
   await page.getByRole("button",{name:"History & audit"}).first().click();
   await expect(page.getByText(/answer.committed/)).toHaveCount(0);
 });
