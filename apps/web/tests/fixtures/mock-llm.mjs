@@ -1,10 +1,20 @@
 import {createServer} from "node:http";
 const plan={
  role:"Senior Backend Engineer",level:"Senior",overview:"Focus on production ownership and reliability.",
- stages:[{topic:"Backend architecture",questions:["Explain your service design decisions."],
-          suggestedAnswers:["I would define explicit service boundaries, clear API contracts, reliable retries, and observability before scaling."]},
-         {topic:"Teamwork",questions:["Describe how you reviewed code."],
-          suggestedAnswers:["A strong review combines correctness, test coverage, maintainability, and constructive feedback to the author."]}],
+ stages:[
+  {topic:"Backend architecture",items:[{
+   type:"standalone",prompt:"Explain your service design decisions.",
+   goal:"Assess service boundaries and API contracts",maxFollowUps:0,
+   completionCriteria:"Answer is submitted",
+   suggestedAnswer:"I would define explicit service boundaries, clear API contracts, reliable retries, and observability before scaling."
+  }]},
+  {topic:"Production incident deep dive",items:[{
+   type:"interactive",prompt:"Walk through a database reliability incident from your project.",
+   goal:"Assess incident triage, investigation, tradeoffs and prevention",maxFollowUps:2,
+   completionCriteria:"Candidate explains investigation, root cause and preventative action",
+   suggestedAnswer:"I would diagnose slow queries using production traces, review query plans and indexes, then validate safer migrations and alerting against an agreed latency target."
+  }]}
+ ],
  rubric:[{competency:"Reliability",criteria:"Uses measurable safeguards and incident lessons."},
          {competency:"Communication",criteria:"Explains tradeoffs clearly."}]
 };
@@ -26,7 +36,7 @@ const server=createServer(async(req,res)=>{
  const result=content.includes("Create a realistic interview plan")?plan:
   content.includes("Revise this interview plan")?{...plan,overview:"Revised focus on database incidents."}:
   content.includes("Give brief coaching structure")?{hint:"Describe the challenge, your actions, measured results, and tradeoffs."}:
-  {question:"How did you improve database reliability in production?",competency:"Reliability",
+  {nextAction:"follow_up",question:"How did you improve database reliability in production?",competency:"Reliability",
    rationale:"Grounded follow-up on role and historical examples",
    suggestedAnswer:"I would diagnose slow queries using production traces, review query plans and indexes, then validate safer migrations and alerting against an agreed latency target."};
  res.end(JSON.stringify({model:"ci-mock-model",choices:[{message:{content:JSON.stringify(result)}}]}));
