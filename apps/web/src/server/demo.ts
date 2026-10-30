@@ -161,6 +161,11 @@ export function getSession(ownerId:UserId, id:string) {
     : null;
   return { ...session, scenario: { role: scenario.role, focus: scenario.focus }, turns,
     nextQuestionId: upcoming?.id ?? null,
+    nextQuestionType: upcoming?.questionType ?? null,
+    nextScenarioTitle: upcoming?.scenarioTitle ?? null,
+    nextScenarioGoal: upcoming?.scenarioGoal ?? null,
+    nextFollowUpDepth: upcoming?.followUpDepth ?? 0,
+    nextFollowUpLimit: upcoming?.followUpLimit ?? 0,
     nextSuggestedAnswer: session.state==="IN_PROGRESS" && turns.length<maxDemoTurns && session.mode==="live"
       ? upcoming?.suggestedAnswer || null : null,
     nextQuestion: session.state === "IN_PROGRESS" && turns.length < maxDemoTurns

@@ -2,11 +2,11 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { and, count, desc, eq, gte } from "drizzle-orm";
 import { z } from "zod";
-import { DomainError, maxDemoTurns, validateSpeechConfig } from "@interview/core";
+import { DomainError, maxDemoTurns, nextFlowPosition, validateSpeechConfig } from "@interview/core";
 import { db } from "./db/client";
 import { interviewSessions,interviewTurns,liveHints,liveQuestions,liveSessionSources,scenarioPlans,scenarios,workflowEvents } from "./db/schema";
-import { changeScenario,createScenario,createSession,getScenario,getSession } from "./demo";
-import {hintSchema,nextInterviewQuestion,planScenario,planSchema,proposeHint,promptVersion,revisePlan} from "./ai";
+import { changeScenario,changeSession,createScenario,createSession,getScenario,getSession } from "./demo";
+import {decideScenarioFollowUp,hintSchema,nextInterviewQuestion,planScenario,planSchema,proposeHint,promptVersion,revisePlan} from "./ai";
 import {assertReady} from "./ai-settings";
 import {withAiBudget} from "./ai-budget";
 
@@ -190,35 +190,100 @@ export function getLiveSessionCloneSource(ownerId:string,id:string){
   cvText:revision.cvText,cvFilename:revision.cvFilename,source:"legacy" as const
  };
 }
+/** Persisted, server-controlled cursor for standalone vs interactive questions. */
 export async function prepareLiveQuestion(ownerId:string,id:string){
  const session=owned(id,ownerId);
  if(session.state!=="IN_PROGRESS")throw new DomainError("transition","Interview not in progress");
  const snapshot=getSession(ownerId,id);
  const sequence=snapshot.turns.length+1;
  if(sequence>maxDemoTurns)throw new DomainError("limit","Maximum live turns reached");
- const existing=db.select().from(liveQuestions).where(and(eq(liveQuestions.sessionId,id),eq(liveQuestions.sequence,sequence))).get();
+ const existing=db.select().from(liveQuestions)
+  .where(and(eq(liveQuestions.sessionId,id),eq(liveQuestions.sequence,sequence))).get();
  if(existing)return getSession(ownerId,id);
-return withAiBudget(ownerId,{"action":"question","sessionId":id,"sequence":sequence},async()=>{
+
  const {plan}=planFor(session.scenarioId,session.scenarioRevision);
  const speech=validateSpeechConfig(JSON.parse(session.speechConfig));
- const generated=await nextInterviewQuestion(ownerId,plan,snapshot.turns,speech.interviewerLocale);
- db.transaction(tx=>{
-  const row=tx.select().from(interviewSessions).where(eq(interviewSessions.id,id)).get();
-  const last=tx.select({sequence:interviewTurns.sequence}).from(interviewTurns)
-    .where(eq(interviewTurns.sessionId,id)).orderBy(desc(interviewTurns.sequence)).limit(1).get();
-  if(row?.state!=="IN_PROGRESS"||(last?.sequence??0)+1!==sequence)
-    throw new DomainError("conflict","Stale question generation");
-  const previous=tx.select().from(liveQuestions).where(and(eq(liveQuestions.sessionId,id),eq(liveQuestions.sequence,sequence))).get();
-  if(previous)return;
-  tx.insert(liveQuestions).values({id:randomUUID(),sessionId:id,sequence,
-    question:generated.output.question,competency:generated.output.competency,
-    suggestedAnswer:generated.output.suggestedAnswer,
-    modelId:generated.modelId,promptVersion,createdAt:Date.now()}).run();
-  event(tx as unknown as typeof db,id,"question.prepared",{sequence,modelId:generated.modelId,promptVersion});
- });
- return getSession(ownerId,id); });
+ const steps=plan.stages.flatMap(stage=>(stage.items||[]).map(item=>({...item,title:stage.topic})));
+ const last=sequence===1?null:db.select().from(liveQuestions)
+  .where(and(eq(liveQuestions.sessionId,id),eq(liveQuestions.sequence,sequence-1))).get();
+ const legacy=!!last&&last.itemIndex<0;
+ const prev=last&&!legacy?{
+  itemIndex:last.itemIndex,depth:last.followUpDepth,
+  type:last.questionType==="interactive"?"interactive" as const:"standalone" as const
+ }:null;
 
+ function persist(data:{
+  question:string;suggestedAnswer:string;competency:string;modelId:string;
+  itemIndex:number;questionType:"standalone"|"interactive"|"legacy";
+  followUpDepth:number;scenarioTitle:string;scenarioGoal:string;followUpLimit:number;action:string
+ }){
+  db.transaction(tx=>{
+   const current=tx.select().from(interviewSessions).where(eq(interviewSessions.id,id)).get();
+   const previousTurn=tx.select({sequence:interviewTurns.sequence}).from(interviewTurns)
+    .where(eq(interviewTurns.sessionId,id)).orderBy(desc(interviewTurns.sequence)).limit(1).get();
+   if(current?.state!=="IN_PROGRESS"||(previousTurn?.sequence??0)+1!==sequence)
+    throw new DomainError("conflict","Stale question generation");
+   const row=tx.select().from(liveQuestions)
+    .where(and(eq(liveQuestions.sessionId,id),eq(liveQuestions.sequence,sequence))).get();
+   if(row)return;
+   tx.insert(liveQuestions).values({
+    id:randomUUID(),sessionId:id,sequence,question:data.question,
+    competency:data.competency,suggestedAnswer:data.suggestedAnswer,
+    modelId:data.modelId,promptVersion,itemIndex:data.itemIndex,
+    questionType:data.questionType,followUpDepth:data.followUpDepth,
+    scenarioTitle:data.scenarioTitle,scenarioGoal:data.scenarioGoal,
+    followUpLimit:data.followUpLimit,createdAt:Date.now()
+   }).run();
+   event(tx as unknown as typeof db,id,"question.prepared",{
+    sequence,promptVersion,modelId:data.modelId,action:data.action,
+    itemIndex:data.itemIndex,questionType:data.questionType,followUpDepth:data.followUpDepth
+   });
+  });
+  return getSession(ownerId,id);
+ }
+
+ // Meetings started before migration keep the original adaptive question system.
+ if(legacy||!steps.length){
+  return withAiBudget(ownerId,{action:"question",sessionId:id,sequence},async()=>{
+   const generated=await nextInterviewQuestion(ownerId,plan,snapshot.turns,speech.interviewerLocale);
+   return persist({...generated.output,modelId:generated.modelId,
+    itemIndex:-1,questionType:"legacy",followUpDepth:0,
+    scenarioTitle:"",scenarioGoal:"",followUpLimit:0,action:"legacy_adaptive"});
+  });
+ }
+ const current=prev?steps[prev.itemIndex]:undefined;
+ const needsDecision=!!prev&&current?.type==="interactive"&&prev.depth<current.maxFollowUps;
+ const execute=async()=>{
+  const decision=needsDecision?await decideScenarioFollowUp(
+   ownerId,current!,snapshot.turns,prev!.depth,speech.interviewerLocale):null;
+  const position=nextFlowPosition(steps,prev,decision?.output.nextAction??null,
+   snapshot.turns.length,maxDemoTurns);
+  if(position.kind==="finish"){
+   const latest=owned(id,ownerId);
+   if(latest.state==="IN_PROGRESS"){
+    try{return changeSession(ownerId,id,{action:"finish",expectedVersion:latest.version});}
+    catch(error){
+     if(error instanceof DomainError&&error.kind==="conflict")return getSession(ownerId,id);
+     throw error;
+    }
+   }
+   return getSession(ownerId,id);
+  }
+  const item=steps[position.itemIndex]!;
+  return persist({
+   question:position.followUp?decision!.output.question:item.prompt,
+   suggestedAnswer:position.followUp?decision!.output.suggestedAnswer:item.suggestedAnswer,
+   competency:item.goal,
+   modelId:position.followUp?decision!.modelId:"planned-script",
+   itemIndex:position.itemIndex,questionType:item.type,followUpDepth:position.depth,
+   scenarioTitle:item.title,scenarioGoal:item.goal,followUpLimit:item.maxFollowUps,
+   action:position.followUp?"follow_up":"planned_question"
+  });
+ };
+ // Static questions never consume provider calls or hourly AI capacity.
+ return needsDecision?withAiBudget(ownerId,{action:"decision",sessionId:id,sequence},execute):execute();
 }
+
 export async function exposeHint(ownerId:string,id:string){
  const session=owned(id,ownerId);
  if(session.state!=="IN_PROGRESS")throw new DomainError("transition","Interview not in progress");
