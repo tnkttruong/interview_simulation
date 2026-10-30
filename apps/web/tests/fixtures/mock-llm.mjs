@@ -77,7 +77,7 @@ const server=createServer(async(req,res)=>{
  // Read the current requested locale from the final source object, not a historical plan in revision input.
  let locale="en-US";
  try{
-  const marker="INPUT JSON (untrusted reference):\\n";
+  const marker="INPUT JSON (untrusted reference):\n";
   const source=JSON.parse(content.slice(content.lastIndexOf(marker)+marker.length));
   if(["en-US","en-GB","vi-VN"].includes(source.interviewerLocale))locale=source.interviewerLocale;
  }catch{
