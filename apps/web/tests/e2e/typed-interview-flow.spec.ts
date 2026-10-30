@@ -39,6 +39,7 @@ test("standalone → scenario opener → AI follow-up → AI advances → comple
  const get=async()=>await (await page.request.get("/api/demo/sessions/"+id)).json() as {
   state:string;turns:{question:string;answer:string}[];nextQuestion:string|null;
   nextQuestionId:string|null;nextQuestionType:string;nextFollowUpDepth:number;
+  nextSuggestedAnswer:string|null;nextFullAnswer:string|null;
  };
  const next=async()=>page.request.post("/api/live/sessions/"+id+"/question");
  const answer=async(text:string)=>{
