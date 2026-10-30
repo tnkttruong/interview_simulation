@@ -29,7 +29,7 @@ test("requires latest scenario approval and explicit transcript consent", async 
 
   await page.getByRole("button",{name:"Scenario review"}).first().click();
   await page.getByRole("button",{name:/Approve latest revision/}).click();
-  await page.getByRole("link",{name:/Continue to preflight/}).click();
+  // Approval redirects to the dedicated preflight page.
   await expect(page.getByRole("button",{name:"Start Demo meeting →"})).toBeDisabled();
   await page.getByRole("checkbox",{name:/explicitly consent/}).check();
   await page.getByRole("button",{name:"Start Demo meeting →"}).click();
@@ -56,7 +56,7 @@ test("a new meeting requires fresh consent and old session evidence does not lea
   await page.getByRole("button",{name:"New interview",exact:true}).click();
   await page.getByRole("button",{name:/Create demo scenario/}).click();
   await page.getByRole("button",{name:/Approve latest revision/}).click();
-  await page.getByRole("link",{name:/Continue to preflight/}).click();
+  // Approval redirects to the dedicated preflight page.
   await page.getByRole("checkbox",{name:/explicitly consent/}).check();
   await page.getByRole("button",{name:"Start Demo meeting →"}).click();
   await page.getByLabel("Type answer (STT fallback / offline demo)").fill("Question 1 answer");
