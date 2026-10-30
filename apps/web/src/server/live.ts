@@ -25,6 +25,13 @@ function planFor(scenarioId:string,revision:number){
  if(!row||!row.planJson)throw new DomainError("invalid","Live scenario plan not available");
  return {row,plan:planSchema.parse(JSON.parse(row.planJson))};
 }
+/** Session plan snapshot prevents editing a scenario from changing active question indexes. */
+function planForSession(sessionId:string,scenarioId:string,revision:number){
+ const saved=db.select({planJson:liveSessionSources.planJson}).from(liveSessionSources)
+  .where(eq(liveSessionSources.sessionId,sessionId)).get();
+ if(saved?.planJson)return planSchema.parse(JSON.parse(saved.planJson));
+ return planFor(scenarioId,revision).plan;
+}
 function event(tx:typeof db,sessionId:string,type:string,metadata:Record<string,unknown>){
  const last=tx.select({seq:workflowEvents.seq}).from(workflowEvents)
  .where(eq(workflowEvents.sessionId,sessionId)).orderBy(desc(workflowEvents.seq)).limit(1).get();
@@ -165,7 +172,8 @@ export function startLive(ownerId:string,input:unknown) {
  const started=createSession(ownerId,data,"live");
  db.insert(liveSessionSources).values({
   sessionId:started.id,role:scenario.role,jobDescription:scenario.jobDescription,
-  focus:scenario.focus,cvText:row.cvText,cvFilename:row.cvFilename,createdAt:Date.now()
+  focus:scenario.focus,cvText:row.cvText,cvFilename:row.cvFilename,
+  planJson:row.planJson,createdAt:Date.now()
  }).onConflictDoNothing().run();
  return started;
 }
@@ -201,7 +209,7 @@ export async function prepareLiveQuestion(ownerId:string,id:string){
   .where(and(eq(liveQuestions.sessionId,id),eq(liveQuestions.sequence,sequence))).get();
  if(existing)return getSession(ownerId,id);
 
- const {plan}=planFor(session.scenarioId,session.scenarioRevision);
+ const plan=planForSession(id,session.scenarioId,session.scenarioRevision);
  const speech=validateSpeechConfig(JSON.parse(session.speechConfig));
  const steps=plan.stages.flatMap(stage=>(stage.items||[]).map(item=>({...item,title:stage.topic})));
  const last=sequence===1?null:db.select().from(liveQuestions)
@@ -294,7 +302,7 @@ export async function exposeHint(ownerId:string,id:string){
  const existing=db.select().from(liveHints).where(and(eq(liveHints.sessionId,id),eq(liveHints.sequence,sequence))).get();
  if(existing)return {hint:existing.hint,modelId:existing.modelId,sequence};
 return withAiBudget(ownerId,{"action":"hint","sessionId":id,"sequence":sequence},async()=>{
- const {plan}=planFor(session.scenarioId,session.scenarioRevision);
+ const plan=planForSession(id,session.scenarioId,session.scenarioRevision);
  const generated=await proposeHint(ownerId,plan,question.question,snapshot.turns);
  db.transaction(tx=>{
   const row=tx.select().from(interviewSessions).where(eq(interviewSessions.id,id)).get();

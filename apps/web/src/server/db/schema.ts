@@ -109,6 +109,7 @@ export const liveSessionSources=sqliteTable("live_session_sources",{
  focus:text("focus").notNull(),
  cvText:text("cv_text").notNull(),
  cvFilename:text("cv_filename").notNull(),
+ planJson:text("plan_json").notNull().default(""),
  createdAt:integer("created_at").notNull()
 });
 export const liveQuestions = sqliteTable("live_questions",{
