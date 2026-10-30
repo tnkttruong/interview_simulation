@@ -185,8 +185,10 @@ export function startLive(ownerId:string,input:unknown) {
  const data=z.object({scenarioId:z.string().uuid(),revision:z.number().int().positive(),
   requestKey:z.string().uuid(),speech:z.unknown()}).parse(input);
  const scenario=getScenario(ownerId,data.scenarioId);
- const {row}=planFor(data.scenarioId,data.revision);
- validateSpeechConfig(data.speech);
+ const {row,plan}=planFor(data.scenarioId,data.revision);
+ const speech=validateSpeechConfig(data.speech);
+ if(plan.bilingual&&speech.interviewerLocale!==plan.bilingual.interviewerLocale)
+  throw new DomainError("invalid","Interviewer language differs from this approved script. Regenerate a new revision with the desired Default interviewer language.");
  const started=createSession(ownerId,data,"live");
  db.insert(liveSessionSources).values({
   sessionId:started.id,role:scenario.role,jobDescription:scenario.jobDescription,

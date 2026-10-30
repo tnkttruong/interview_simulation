@@ -19,6 +19,27 @@ export const interviewItemSchema = z.object({
     ctx.addIssue({code:"custom",path:["maxFollowUps"],message:"Interactive scenarios require a follow-up allowance"});
 });
 export type InterviewItem = z.infer<typeof interviewItemSchema>;
+const interviewerLocaleSchema=z.enum(["en-US","en-GB","vi-VN"]);
+
+/** Vietnamese source copy, index-aligned with the executable interviewer-language script. */
+const vietnamesePlanSchema=z.object({
+  role:z.string().min(2).max(250),
+  level:z.string().min(1).max(120),
+  overview:z.string().min(1).max(4000),
+  stages:z.array(z.object({
+    topic:z.string().min(1).max(250),
+    items:z.array(z.object({
+      prompt:z.string().min(8).max(1000),
+      goal:z.string().min(5).max(500),
+      completionCriteria:z.string().min(5).max(800),
+      suggestedAnswer:z.string().min(20).max(1800)
+    })).min(1).max(10)
+  })).min(1).max(10),
+  rubric:z.array(z.object({
+    competency:z.string().min(1).max(200),
+    criteria:z.string().min(1).max(1000)
+  })).min(1).max(12)
+});
 
 export const planSchema = z.object({
   role: z.string().min(2).max(250),
@@ -33,10 +54,28 @@ export const planSchema = z.object({
   rubric: z.array(z.object({
     competency: z.string().max(200),
     criteria: z.string().max(1000)
-  })).min(1).max(12)
+  })).min(1).max(12),
+  // Optional to keep historical plans valid without rewriting saved JSON.
+  bilingual:z.object({
+    interviewerLocale:interviewerLocaleSchema,
+    vietnamese:vietnamesePlanSchema
+  }).optional()
 });
 const generatedPlanSchema = planSchema.superRefine((plan, ctx) => {
   const items=plan.stages.flatMap(stage=>stage.items||[]);
+  if(!plan.bilingual){
+    ctx.addIssue({code:"custom",path:["bilingual"],message:"Generated scripts require a Vietnamese table and a translation"});
+  }else{
+    const vi=plan.bilingual.vietnamese;
+    if(vi.stages.length!==plan.stages.length)
+      ctx.addIssue({code:"custom",path:["bilingual","vietnamese","stages"],message:"Both tables must have the same number of stages"});
+    plan.stages.forEach((stage,index)=>{
+      if(vi.stages[index]?.items.length!==stage.items?.length)
+        ctx.addIssue({code:"custom",path:["bilingual","vietnamese","stages",index],message:"Vietnamese and translated questions must align 1:1"});
+    });
+    if(vi.rubric.length!==plan.rubric.length)
+      ctx.addIssue({code:"custom",path:["bilingual","vietnamese","rubric"],message:"Both rubrics must align 1:1"});
+  }
   if(maxFlowTurns(items)>maxDemoTurns)
     ctx.addIssue({code:"custom",path:["stages"],message:"Plan exceeds the 15-answer budget including all possible follow-ups"});
   if(!items.some(item=>item.type==="standalone")||!items.some(item=>item.type==="interactive"))
@@ -62,7 +101,7 @@ export const interactiveDecisionSchema=questionSchema.extend({
 });
 export const hintSchema = z.object({ hint: z.string().min(8).max(1200) });
 
-const PROMPT_VERSION = "live-v3-typed-interview-flow";
+const PROMPT_VERSION = "live-v4-bilingual-interviewer-plan";
 export const promptVersion = PROMPT_VERSION;
 export function liveConfigured() { return !!(process.env.OPENAI_API_KEY && process.env.AI_MODEL); }
 const assistantBase = process.env.LLM_BASE_URL || "https://api.openai.com/v1";
@@ -168,7 +207,10 @@ export function normalizePlan(data: unknown): unknown {
   }
   rubric = rubric.slice(0, 12);
 
-  return { role, level, overview, stages, rubric };
+  // Keep the AI's Vietnamese source alongside the interviewer-language fields.
+  // Old scripts have no bilingual property and remain supported unchanged.
+  return { role, level, overview, stages, rubric,
+    ...(unwrapped.bilingual!==undefined?{bilingual:unwrapped.bilingual}:{}) };
 }
 
 /** Provider selection is owner-scoped; web secrets never enter CLI child environments. */
@@ -242,16 +284,46 @@ export async function completeStructured<T extends z.ZodTypeAny>(schema: T, task
   return { output: output.data as z.infer<T>, modelId };
 }
 
-export function planScenario(ownerId: string, role: string, jobDescription: string, cvText: string, focus: string) {
-  return completeStructured(generatedPlanSchema,
-    "Create a realistic interview plan. Return JSON {role,level,overview,stages:[{topic,items:[{type,prompt,goal,maxFollowUps,completionCriteria,suggestedAnswer}]}],rubric:[{competency,criteria}]}. Produce 2-3 stages with 2 items each and BOTH standalone and interactive types. The TOTAL items plus all maxFollowUps MUST be at most 15 answers. Standalone: one exact question, maxFollowUps=0, then advance. Interactive: one opening situation or CV project deep dive, maxFollowUps=1-3; ask follow-ups only after hearing the candidate's answer. goal and completionCriteria describe the evidence to gather and when to leave the situation. suggestedAnswer 60-120 words, max 1800 characters. Ground in JD and CV; never invent achievements. Don't pre-generate branching follow-ups.",
-    { role, jobDescription, cvText, focus }, ownerId);
+
+const languageNames={"en-US":"English (US)","en-GB":"English (UK)","vi-VN":"Vietnamese"} as const;
+function bilingualInstruction(locale:keyof typeof languageNames){
+ return "Make TWO aligned versions of the same interview script in ONE JSON response: " +
+  "(1) full Vietnamese source in bilingual.vietnamese; " +
+  "(2) executable translation in top-level role,level,overview,stages,rubric, written strictly in " + languageNames[locale] + " ("+locale+"). " +
+  "Return bilingual:{interviewerLocale:\""+locale+"\",vietnamese:{role,level,overview,stages:[{topic,items:[{prompt,goal,completionCriteria,suggestedAnswer}]}],rubric:[{competency,criteria}]}}. " +
+  "Top-level stages contain items:[{type,prompt,goal,maxFollowUps,completionCriteria,suggestedAnswer}], not questions arrays; the server derives those. " +
+  "Translate every opening question, goal, completion criterion, suggested answer, stage title, overview and rubric faithfully. " +
+  "The Vietnamese and translated tables MUST have exactly the same stage and item order and count, and matching rubric order. " +
+  "For vi-VN the translated table is also in Vietnamese. Never let the JD/CV language override the requested interviewer language. ";
+}
+function enforcePlanLocale<T extends {bilingual?:{interviewerLocale:string}}>(output:T,expected:string):T{
+ if(output.bilingual?.interviewerLocale!==expected)
+  throw new DomainError("invalid","AI plan locale disagreed with saved Default interviewer language; retry generation");
+ return output;
+}
+export async function planScenario(ownerId: string, role: string, jobDescription: string, cvText: string, focus: string) {
+ const locale=assertReady(ownerId).interviewerLocale;
+ const generated=await completeStructured(generatedPlanSchema,
+  "Create a realistic interview plan. "+bilingualInstruction(locale)+
+  "Produce 2-3 stages with 2 items each and BOTH standalone and interactive types. TOTAL items plus all maxFollowUps MUST be at most 15 answers. " +
+  "Standalone: one exact question, maxFollowUps=0. Interactive: one opening situation or CV project deep dive, maxFollowUps=1-3; do not pre-generate branching follow-ups. " +
+  "goal and completionCriteria describe evidence to gather and when to leave the situation. Suggested answers 60-120 words, max 1800 characters. " +
+  "Ground BOTH versions in the JD and CV without inventing candidate achievements.",
+  { role, jobDescription, cvText, focus, interviewerLocale:locale }, ownerId);
+ enforcePlanLocale(generated.output,locale);
+ return generated;
 }
 
-export function revisePlan(ownerId: string, plan: ScenarioPlan, feedback: string, jobDescription: string, cvText: string) {
-  return completeStructured(generatedPlanSchema,
-    "Revise this interview plan per feedback. Return complete JSON {role,level,overview,stages:[{topic,items:[{type,prompt,goal,maxFollowUps,completionCriteria,suggestedAnswer}]}],rubric:[{competency,criteria}]}. Preserve a mix of standalone and interactive questions. The TOTAL items plus all maxFollowUps MUST be at most 15; shorten the plan if needed. Standalone maxFollowUps=0; interactive maxFollowUps=1-3 with one opening question, explicit goal and completionCriteria. Generate one 60-120 word suggested answer per item, max 1800 characters. No prewritten branching follow-ups, never invent candidate achievements.",
-    { plan, feedback, jobDescription, cvText }, ownerId);
+export async function revisePlan(ownerId: string, plan: ScenarioPlan, feedback: string, jobDescription: string, cvText: string) {
+ const locale=assertReady(ownerId).interviewerLocale;
+ const generated=await completeStructured(generatedPlanSchema,
+  "Revise this interview plan per feedback. "+bilingualInstruction(locale)+
+  "Preserve the sensible parts of the plan and both standalone and interactive types. TOTAL items plus all maxFollowUps MUST be at most 15 answers. " +
+  "Standalone maxFollowUps=0; interactive maxFollowUps=1-3 with explicit goal and completionCriteria. " +
+  "Generate one 60-120 word suggested answer per item in EACH language, max 1800 chars. Do not invent candidate achievements.",
+  { plan, feedback, jobDescription, cvText, interviewerLocale:locale }, ownerId);
+ enforcePlanLocale(generated.output,locale);
+ return generated;
 }
 
 export function nextInterviewQuestion(ownerId: string, plan: ScenarioPlan, turns: { question: string, answer: string }[], locale: string) {
