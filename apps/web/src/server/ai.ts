@@ -11,7 +11,9 @@ export const interviewItemSchema = z.object({
   goal: z.string().min(5).max(500),
   maxFollowUps: z.number().int().min(0).max(3),
   completionCriteria: z.string().min(5).max(800),
-  suggestedAnswer: z.string().min(20).max(1800)
+  suggestedAnswer: z.string().min(20).max(1800),
+  // Historical plans lack this field; newly generated revisions require it.
+  fullAnswer: z.string().min(80).max(3500).optional()
 }).superRefine((item,ctx)=>{
   if(item.type==="standalone"&&item.maxFollowUps!==0)
     ctx.addIssue({code:"custom",path:["maxFollowUps"],message:"Standalone questions must not branch"});
@@ -32,7 +34,8 @@ const vietnamesePlanSchema=z.object({
       prompt:z.string().min(8).max(1000),
       goal:z.string().min(5).max(500),
       completionCriteria:z.string().min(5).max(800),
-      suggestedAnswer:z.string().min(20).max(1800)
+      suggestedAnswer:z.string().min(20).max(1800),
+      fullAnswer:z.string().min(80).max(3500).optional()
     })).min(1).max(10)
   })).min(1).max(10),
   rubric:z.array(z.object({
@@ -85,6 +88,12 @@ const generatedPlanSchema = planSchema.superRefine((plan, ctx) => {
       ctx.addIssue({code:"custom",path:["stages",index,"items"],message:"Each question needs its own typed flow item"});
     if(stage.suggestedAnswers?.length!==stage.questions.length)
       ctx.addIssue({code:"custom",path:["stages",index,"suggestedAnswers"],message:"One suggested answer required per question"});
+    stage.items?.forEach((item,j)=>{
+      if(!item.fullAnswer)
+        ctx.addIssue({code:"custom",path:["stages",index,"items",j,"fullAnswer"],message:"One complete candidate answer required per question"});
+      if(!plan.bilingual?.vietnamese.stages[index]?.items[j]?.fullAnswer)
+        ctx.addIssue({code:"custom",path:["bilingual","vietnamese","stages",index,"items",j,"fullAnswer"],message:"One Vietnamese complete candidate answer required per question"});
+    });
   });
 });
 export type ScenarioPlan = z.infer<typeof planSchema>;
@@ -93,7 +102,8 @@ export const questionSchema = z.object({
   question: z.string().min(8).max(1000),
   competency: z.string().min(2).max(200),
   rationale: z.string().max(500),
-  suggestedAnswer: z.string().min(20).max(1800)
+  suggestedAnswer: z.string().min(20).max(1800),
+  fullAnswer: z.string().min(80).max(3500)
 });
 
 export const interactiveDecisionSchema=questionSchema.extend({
@@ -101,7 +111,7 @@ export const interactiveDecisionSchema=questionSchema.extend({
 });
 export const hintSchema = z.object({ hint: z.string().min(8).max(1200) });
 
-const PROMPT_VERSION = "live-v4-bilingual-interviewer-plan";
+const PROMPT_VERSION = "live-v5-complete-answer";
 export const promptVersion = PROMPT_VERSION;
 export function liveConfigured() { return !!(process.env.OPENAI_API_KEY && process.env.AI_MODEL); }
 const assistantBase = process.env.LLM_BASE_URL || "https://api.openai.com/v1";
@@ -163,7 +173,8 @@ export function normalizePlan(data: unknown): unknown {
        goal:String(obj.goal||"").slice(0,500),
        maxFollowUps:obj.maxFollowUps,
        completionCriteria:String(obj.completionCriteria||"").slice(0,800),
-       suggestedAnswer:String(obj.suggestedAnswer||"").slice(0,1800)
+       suggestedAnswer:String(obj.suggestedAnswer||"").slice(0,1800),
+       ...(obj.fullAnswer!=null?{fullAnswer:String(obj.fullAnswer).slice(0,3500)}:{})
       };
     }):legacyQuestions.map((prompt:string,index:number)=>({
       type:"standalone" as const,prompt,goal:"Assess the candidate's knowledge of this topic",
@@ -235,7 +246,7 @@ export async function completeStructured<T extends z.ZodTypeAny>(schema: T, task
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + process.env.OPENAI_API_KEY },
       signal: AbortSignal.timeout((schema as unknown) === generatedPlanSchema ? 90000 : 25000), cache: "no-store",
       body: JSON.stringify({
-        model: settings.model, temperature: 0.35, response_format: { type: "json_object" }, max_tokens: (schema as unknown) === generatedPlanSchema ? 11000 : 6500,
+        model: settings.model, temperature: 0.35, response_format: { type: "json_object" }, max_tokens: (schema as unknown) === generatedPlanSchema ? 14000 : 6500,
         messages: [{ role: "system", content: system }, { role: "user", content: taskPrompt }]
       })
     });
@@ -265,6 +276,7 @@ export async function completeStructured<T extends z.ZodTypeAny>(schema: T, task
       competency: (qObj.competency || qObj.topic || "Technical Competency").toString().slice(0, 200),
       rationale: (qObj.rationale || qObj.reason || "Evaluates depth and practical problem-solving capability.").toString().slice(0, 500),
       suggestedAnswer: (qObj.suggestedAnswer || "").toString().slice(0, 1800),
+      fullAnswer: (qObj.fullAnswer || "").toString().slice(0, 3500),
       ...(sAny===interactiveDecisionSchema?{nextAction:qObj.nextAction}: {})
     };
   } else if (sAny === hintSchema && parsed && typeof parsed === "object") {
@@ -290,12 +302,24 @@ function bilingualInstruction(locale:keyof typeof languageNames){
  return "Make TWO aligned versions of the same interview script in ONE JSON response: " +
   "(1) full Vietnamese source in bilingual.vietnamese; " +
   "(2) executable translation in top-level role,level,overview,stages,rubric, written strictly in " + languageNames[locale] + " ("+locale+"). " +
-  "Return bilingual:{interviewerLocale:\""+locale+"\",vietnamese:{role,level,overview,stages:[{topic,items:[{prompt,goal,completionCriteria,suggestedAnswer}]}],rubric:[{competency,criteria}]}}. " +
-  "Top-level stages contain items:[{type,prompt,goal,maxFollowUps,completionCriteria,suggestedAnswer}], not questions arrays; the server derives those. " +
-  "Translate every opening question, goal, completion criterion, suggested answer, stage title, overview and rubric faithfully. " +
+  "Return bilingual:{interviewerLocale:\""+locale+"\",vietnamese:{role,level,overview,stages:[{topic,items:[{prompt,goal,completionCriteria,suggestedAnswer,fullAnswer}]}],rubric:[{competency,criteria}]}}. " +
+  "Top-level stages contain items:[{type,prompt,goal,maxFollowUps,completionCriteria,suggestedAnswer,fullAnswer}], not questions arrays; the server derives those. " +
+  "Translate every opening question, goal, completion criterion, suggested answer, FULL answer, stage title, overview and rubric faithfully. " +
   "The Vietnamese and translated tables MUST have exactly the same stage and item order and count, and matching rubric order. " +
   "For vi-VN the translated table is also in Vietnamese. Never let the JD/CV language override the requested interviewer language. ";
 }
+/** Keep existing evaluation advice separate from a realistic answer the candidate can speak. */
+const completeAnswerInstruction =
+ "For EVERY question return TWO distinct fields in EACH language: " +
+ "suggestedAnswer = coaching/evaluation guidance (what a strong answer should cover, 60-120 words, max 1800 characters); " +
+ "fullAnswer = a directly usable, technically accurate FIRST-PERSON candidate response, 100-180 words, max 3500 characters. " +
+ "Answer the SPECIFIC question with concrete steps, practical technical details, an example and trade-offs when applicable. " +
+ "Never write coaching/meta phrases in fullAnswer such as 'the candidate should', 'a good answer would', " +
+ "'ứng viên nên' or 'một câu trả lời tốt cần'. " +
+ "Use JD and CV for context but NEVER fabricate personal achievements, job history, metrics or real incidents. " +
+ "If a relevant fact is not supported by CV, give an explicitly hypothetical example or say what you WOULD do, not that you DID it. " +
+ "Preserve suggestedAnswer as its own field. ";
+
 function enforcePlanLocale<T extends {bilingual?:{interviewerLocale:string}}>(output:T,expected:string):T{
  if(output.bilingual?.interviewerLocale!==expected)
   throw new DomainError("invalid","AI plan locale disagreed with saved Default interviewer language; retry generation");
@@ -307,7 +331,7 @@ export async function planScenario(ownerId: string, role: string, jobDescription
   "Create a realistic interview plan. "+bilingualInstruction(locale)+
   "Produce 2-3 stages with 2 items each and BOTH standalone and interactive types. TOTAL items plus all maxFollowUps MUST be at most 15 answers. " +
   "Standalone: one exact question, maxFollowUps=0. Interactive: one opening situation or CV project deep dive, maxFollowUps=1-3; do not pre-generate branching follow-ups. " +
-  "goal and completionCriteria describe evidence to gather and when to leave the situation. Suggested answers 60-120 words, max 1800 characters. " +
+  "goal and completionCriteria describe evidence to gather and when to leave the situation. "+completeAnswerInstruction+
   "Ground BOTH versions in the JD and CV without inventing candidate achievements.",
   { role, jobDescription, cvText, focus, interviewerLocale:locale }, ownerId);
  enforcePlanLocale(generated.output,locale);
@@ -320,7 +344,7 @@ export async function revisePlan(ownerId: string, plan: ScenarioPlan, feedback: 
   "Revise this interview plan per feedback. "+bilingualInstruction(locale)+
   "Preserve the sensible parts of the plan and both standalone and interactive types. TOTAL items plus all maxFollowUps MUST be at most 15 answers. " +
   "Standalone maxFollowUps=0; interactive maxFollowUps=1-3 with explicit goal and completionCriteria. " +
-  "Generate one 60-120 word suggested answer per item in EACH language, max 1800 chars. Do not invent candidate achievements.",
+  completeAnswerInstruction+"Generate distinct suggestedAnswer and fullAnswer for every revised question in BOTH languages. Do not invent candidate achievements.",
   { plan, feedback, jobDescription, cvText, interviewerLocale:locale }, ownerId);
  enforcePlanLocale(generated.output,locale);
  return generated;
@@ -328,7 +352,7 @@ export async function revisePlan(ownerId: string, plan: ScenarioPlan, feedback: 
 
 export function nextInterviewQuestion(ownerId: string, plan: ScenarioPlan, turns: { question: string, answer: string }[], locale: string) {
   return completeStructured(questionSchema,
-    "Return JSON {\"question\":\"string\",\"competency\":\"string\",\"rationale\":\"string\",\"suggestedAnswer\":\"string\"}. Ask ONE concise non-repetitive follow-up based on rubric, planned stages and prior answers. Include a 60-120 word suggested answer for that question (max 1800 characters). Ask in interviewer language " + locale + ". Stay on-role. If prior answer is vague, probe evidence. Never invent candidate achievements. Do not reveal rubric or critique.",
+    "Return JSON {question,competency,rationale,suggestedAnswer,fullAnswer}. Ask ONE concise non-repetitive follow-up grounded in the rubric, plan and prior answers. Keep suggestedAnswer as coaching/evaluation guidance (max 1800 chars). fullAnswer must be a direct complete FIRST-PERSON candidate answer (100-180 words, max 3500 chars) to THIS question, not coaching instructions. Both answers must use interviewer language "+locale+". No fabricated candidate achievements. Stay on-role; probe vague answers. Do not reveal rubric or critique.",
     { plan, turns: turns.slice(-3) }, ownerId);
 }
 
@@ -342,6 +366,6 @@ export function proposeHint(ownerId: string, plan: ScenarioPlan, question: strin
 export function decideScenarioFollowUp(ownerId:string, item:InterviewItem,
  turns:{question:string,answer:string}[], depth:number, locale:string){
  return completeStructured(interactiveDecisionSchema,
-  "Decide whether to follow up on the CURRENT interactive scenario. Return JSON {nextAction:\"follow_up\"|\"next_question\",question,competency,rationale,suggestedAnswer}. Use follow_up only when a meaningful gap remains against completionCriteria; ask a specific NEW question based on the actual answer and scenario goal. Use next_question when enough evidence was gathered, answers repeat, or the situation is exhausted. next_question will advance to the next planned item, not a model-selected topic. Generate suggestedAnswer 60-120 words (max 1800 chars) even if advancing. Never invent CV achievements. Interviewer locale: "+locale,
+  "Decide whether to follow up on the CURRENT interactive scenario. Return JSON {nextAction,question,competency,rationale,suggestedAnswer,fullAnswer}. Use follow_up only when a meaningful gap remains against completionCriteria; ask a specific NEW question based on the actual answer and scenario goal. Use next_question when enough evidence was gathered, answers repeat, or the situation is exhausted. next_question will advance to the next planned item, not a model-selected topic. Return both suggestedAnswer as coaching guidance (max 1800 chars) and fullAnswer as a complete FIRST-PERSON candidate response (100-180 words, max 3500 chars) to the new question, even when advancing. Never invent real CV achievements or write meta advice in fullAnswer. Interviewer locale: "+locale,
   {item,depth,turns:turns.slice(-5)},ownerId);
 }
