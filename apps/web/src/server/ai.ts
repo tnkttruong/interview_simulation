@@ -4,6 +4,13 @@ import { DomainError, maxDemoTurns, maxFlowTurns } from "@interview/core";
 import { assertReady } from "./ai-settings";
 import { runCli } from "./ai-cli";
 
+/** Reject meta-coaching text in the separately generated, speakable answer. */
+const fullAnswerSchema=z.string().min(80).max(3500).refine(answer=>{
+  const isAdvice=/(?:candidate should|(?:a|the) (?:good|strong) answer (?:should|would)|ứng viên nên|một câu trả lời tốt|câu trả lời nên)/i.test(answer);
+  const firstPerson=/\b(?:I|we|my)\b/i.test(answer)||/(?:^|[\s,.;:])(?:tôi|mình|em)(?=[\s,.;:]|$)/i.test(answer);
+  return !isAdvice&&firstPerson;
+},{message:"Write a direct first-person candidate response, not advice on how to answer"});
+
 /** One stateless, server-only OpenAI-compatible adapter. No SDK lockfile churn. */
 export const interviewItemSchema = z.object({
   type: z.enum(["standalone", "interactive"]),
@@ -13,7 +20,7 @@ export const interviewItemSchema = z.object({
   completionCriteria: z.string().min(5).max(800),
   suggestedAnswer: z.string().min(20).max(1800),
   // Historical plans lack this field; newly generated revisions require it.
-  fullAnswer: z.string().min(80).max(3500).optional()
+  fullAnswer: fullAnswerSchema.optional()
 }).superRefine((item,ctx)=>{
   if(item.type==="standalone"&&item.maxFollowUps!==0)
     ctx.addIssue({code:"custom",path:["maxFollowUps"],message:"Standalone questions must not branch"});
@@ -35,7 +42,7 @@ const vietnamesePlanSchema=z.object({
       goal:z.string().min(5).max(500),
       completionCriteria:z.string().min(5).max(800),
       suggestedAnswer:z.string().min(20).max(1800),
-      fullAnswer:z.string().min(80).max(3500).optional()
+      fullAnswer:fullAnswerSchema.optional()
     })).min(1).max(10)
   })).min(1).max(10),
   rubric:z.array(z.object({
@@ -103,7 +110,7 @@ export const questionSchema = z.object({
   competency: z.string().min(2).max(200),
   rationale: z.string().max(500),
   suggestedAnswer: z.string().min(20).max(1800),
-  fullAnswer: z.string().min(80).max(3500)
+  fullAnswer: fullAnswerSchema
 });
 
 export const interactiveDecisionSchema=questionSchema.extend({
