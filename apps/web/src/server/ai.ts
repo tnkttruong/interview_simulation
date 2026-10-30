@@ -5,6 +5,21 @@ import { assertReady } from "./ai-settings";
 import { runCli } from "./ai-cli";
 
 /** One stateless, server-only OpenAI-compatible adapter. No SDK lockfile churn. */
+export const interviewItemSchema = z.object({
+  type: z.enum(["standalone", "interactive"]),
+  prompt: z.string().min(8).max(1000),
+  goal: z.string().min(5).max(500),
+  maxFollowUps: z.number().int().min(0).max(3),
+  completionCriteria: z.string().min(5).max(800),
+  suggestedAnswer: z.string().min(20).max(1800)
+}).superRefine((item,ctx)=>{
+  if(item.type==="standalone"&&item.maxFollowUps!==0)
+    ctx.addIssue({code:"custom",path:["maxFollowUps"],message:"Standalone questions must not branch"});
+  if(item.type==="interactive"&&item.maxFollowUps<1)
+    ctx.addIssue({code:"custom",path:["maxFollowUps"],message:"Interactive scenarios require a follow-up allowance"});
+});
+export type InterviewItem = z.infer<typeof interviewItemSchema>;
+
 export const planSchema = z.object({
   role: z.string().min(2).max(250),
   level: z.string().max(120),
@@ -12,7 +27,8 @@ export const planSchema = z.object({
   stages: z.array(z.object({
     topic: z.string().max(250),
     questions: z.array(z.string().max(1000)).min(1).max(10),
-    suggestedAnswers: z.array(z.string().min(20).max(1800)).max(10).optional()
+    suggestedAnswers: z.array(z.string().min(20).max(1800)).max(10).optional(),
+    items: z.array(interviewItemSchema).min(1).max(10).optional()
   })).min(1).max(10),
   rubric: z.array(z.object({
     competency: z.string().max(200),
@@ -20,10 +36,14 @@ export const planSchema = z.object({
   })).min(1).max(12)
 });
 const generatedPlanSchema = planSchema.superRefine((plan, ctx) => {
-  plan.stages.forEach((stage, index) => {
-    if (stage.suggestedAnswers?.length !== stage.questions.length) {
-      ctx.addIssue({ code: "custom", path: ["stages", index, "suggestedAnswers"], message: "One suggested answer is required per question" });
-    }
+  const items=plan.stages.flatMap(stage=>stage.items||[]);
+  if(!items.some(item=>item.type==="standalone")||!items.some(item=>item.type==="interactive"))
+    ctx.addIssue({code:"custom",path:["stages"],message:"Include both standalone and interactive questions"});
+  plan.stages.forEach((stage,index)=>{
+    if(!stage.items?.length||stage.items.length!==stage.questions.length)
+      ctx.addIssue({code:"custom",path:["stages",index,"items"],message:"Each question needs its own typed flow item"});
+    if(stage.suggestedAnswers?.length!==stage.questions.length)
+      ctx.addIssue({code:"custom",path:["stages",index,"suggestedAnswers"],message:"One suggested answer required per question"});
   });
 });
 export type ScenarioPlan = z.infer<typeof planSchema>;
@@ -35,9 +55,12 @@ export const questionSchema = z.object({
   suggestedAnswer: z.string().min(20).max(1800)
 });
 
+export const interactiveDecisionSchema=questionSchema.extend({
+ nextAction:z.enum(["follow_up","next_question"])
+});
 export const hintSchema = z.object({ hint: z.string().min(8).max(1200) });
 
-const PROMPT_VERSION = "live-v2-suggested-answers";
+const PROMPT_VERSION = "live-v3-typed-interview-flow";
 export const promptVersion = PROMPT_VERSION;
 export function liveConfigured() { return !!(process.env.OPENAI_API_KEY && process.env.AI_MODEL); }
 const assistantBase = process.env.LLM_BASE_URL || "https://api.openai.com/v1";
@@ -78,8 +101,8 @@ export function normalizePlan(data: unknown): unknown {
   let stages = rawStages.map((st: unknown, i: number) => {
     const sObj = (st && typeof st === "object" ? st : {}) as Record<string, unknown>;
     const topic = (sObj.topic || sObj.name || sObj.title || sObj.stage || `Stage ${i + 1}`).toString().slice(0, 250);
-    const rawQ = Array.isArray(sObj.questions) ? sObj.questions : (Array.isArray(sObj.items) ? sObj.items : []);
-    let questions = rawQ.map((q: unknown) => {
+    const rawQ = Array.isArray(sObj.questions) ? sObj.questions : [];
+    const legacyQuestions = rawQ.map((q: unknown) => {
       if (typeof q === "string") return q;
       if (q && typeof q === "object") {
         const qObj = q as Record<string, unknown>;
@@ -87,17 +110,35 @@ export function normalizePlan(data: unknown): unknown {
       }
       return String(q);
     }).map((q: string) => q.slice(0, 1000));
-    if (questions.length === 0) questions = ["Discuss your key experiences and technical challenges in this area."];
-    const suggestedAnswers = Array.isArray(sObj.suggestedAnswers)
+    const answers = Array.isArray(sObj.suggestedAnswers)
       ? sObj.suggestedAnswers.map((answer: unknown) => String(answer).slice(0, 1800)).slice(0, 10)
-      : undefined;
-    return { topic, questions: questions.slice(0, 10), suggestedAnswers };
+      : [];
+    const rawItems=Array.isArray(sObj.items)?sObj.items:[];
+    const items=rawItems.length?rawItems.slice(0,10).map((value:unknown)=>{
+      const obj=(value&&typeof value==="object"?value:{}) as Record<string,unknown>;
+      return {
+       type:obj.type,
+       prompt:String(obj.prompt||obj.question||"").slice(0,1000),
+       goal:String(obj.goal||"").slice(0,500),
+       maxFollowUps:obj.maxFollowUps,
+       completionCriteria:String(obj.completionCriteria||"").slice(0,800),
+       suggestedAnswer:String(obj.suggestedAnswer||"").slice(0,1800)
+      };
+    }):legacyQuestions.map((prompt:string,index:number)=>({
+      type:"standalone" as const,prompt,goal:"Assess the candidate's knowledge of this topic",
+      maxFollowUps:0,completionCriteria:"Candidate provides one answer",
+      suggestedAnswer:answers[index]||"Explain the core concept clearly and relate it to practical experience."
+    }));
+    const questions=(items.length?items.map(x=>x.prompt):legacyQuestions).slice(0,10);
+    if(!questions.length)questions.push("Discuss your relevant experience in this area.");
+    const suggestedAnswers=items.length?items.map(x=>x.suggestedAnswer):answers;
+    return {topic,questions,suggestedAnswers:suggestedAnswers.length?suggestedAnswers:undefined,items:items.length?items:undefined};
   });
 
   if (stages.length === 0) {
     stages = [
-      { topic: "Background & Technical Competencies", questions: ["Can you introduce your experience relevant to this role?"], suggestedAnswers: undefined },
-      { topic: "Scenario Deep Dive & Trade-offs", questions: ["How do you handle architectural decisions and trade-offs in production?"], suggestedAnswers: undefined }
+      { topic: "Background & Technical Competencies", questions: ["Can you introduce your experience relevant to this role?"], suggestedAnswers: undefined, items: undefined },
+      { topic: "Scenario Deep Dive & Trade-offs", questions: ["How do you handle architectural decisions and trade-offs in production?"], suggestedAnswers: undefined, items: undefined }
     ];
   }
   stages = stages.slice(0, 10);
@@ -173,13 +214,14 @@ export async function completeStructured<T extends z.ZodTypeAny>(schema: T, task
   const sAny = schema as unknown;
   if (sAny === planSchema || sAny === generatedPlanSchema) {
     parsed = normalizePlan(parsed);
-  } else if (sAny === questionSchema && parsed && typeof parsed === "object") {
+  } else if ((sAny === questionSchema || sAny === interactiveDecisionSchema) && parsed && typeof parsed === "object") {
     const qObj = parsed as Record<string, unknown>;
     parsed = {
       question: (qObj.question || qObj.q || "Could you elaborate on your experience with this technology?").toString().slice(0, 1000),
       competency: (qObj.competency || qObj.topic || "Technical Competency").toString().slice(0, 200),
       rationale: (qObj.rationale || qObj.reason || "Evaluates depth and practical problem-solving capability.").toString().slice(0, 500),
-      suggestedAnswer: (qObj.suggestedAnswer || "").toString().slice(0, 1800)
+      suggestedAnswer: (qObj.suggestedAnswer || "").toString().slice(0, 1800),
+      ...(sAny===interactiveDecisionSchema?{nextAction:qObj.nextAction}: {})
     };
   } else if (sAny === hintSchema && parsed && typeof parsed === "object") {
     const hObj = parsed as Record<string, unknown>;
@@ -200,13 +242,13 @@ export async function completeStructured<T extends z.ZodTypeAny>(schema: T, task
 
 export function planScenario(ownerId: string, role: string, jobDescription: string, cvText: string, focus: string) {
   return completeStructured(generatedPlanSchema,
-    "Create a realistic interview plan. Return JSON with role, level, overview, stages:[{topic,questions:[string],suggestedAnswers:[string]}], rubric:[{competency,criteria}]. Include one 60-120 word suggested answer per question at the same index (max 1800 characters). Use 2 to 4 stages with 2 to 3 targeted questions each. Ground questions in the JD and CV. Never invent personal achievements; use hypothetical framing or placeholders where needed.",
+    "Create a realistic interview plan. Return JSON {role,level,overview,stages:[{topic,items:[{type,prompt,goal,maxFollowUps,completionCriteria,suggestedAnswer}]}],rubric:[{competency,criteria}]}. Produce 2-4 stages with 2-3 items each and BOTH standalone and interactive types. Standalone: one exact question, maxFollowUps=0, then advance. Interactive: one opening situation or CV project deep dive, maxFollowUps=1-3; ask follow-ups only after hearing the candidate's answer. goal and completionCriteria describe the evidence to gather and when to leave the situation. suggestedAnswer 60-120 words, max 1800 characters. Ground in JD and CV; never invent achievements. Don't pre-generate branching follow-ups.",
     { role, jobDescription, cvText, focus }, ownerId);
 }
 
 export function revisePlan(ownerId: string, plan: ScenarioPlan, feedback: string, jobDescription: string, cvText: string) {
   return completeStructured(generatedPlanSchema,
-    "Revise this interview plan per feedback. Return complete JSON with role, level, overview, stages:[{topic,questions:[string],suggestedAnswers:[string]}], rubric:[{competency,criteria}]. Preserve good stages and provide one 60-120 word suggested answer per question at the same index (max 1800 characters). Replace outdated answers when questions change. Never invent personal achievements.",
+    "Revise this interview plan per feedback. Return complete JSON {role,level,overview,stages:[{topic,items:[{type,prompt,goal,maxFollowUps,completionCriteria,suggestedAnswer}]}],rubric:[{competency,criteria}]}. Preserve a mix of standalone and interactive questions. Standalone maxFollowUps=0; interactive maxFollowUps=1-3 with one opening question, explicit goal and completionCriteria. Generate one 60-120 word suggested answer per item, max 1800 characters. No prewritten branching follow-ups, never invent candidate achievements.",
     { plan, feedback, jobDescription, cvText }, ownerId);
 }
 
@@ -220,4 +262,12 @@ export function proposeHint(ownerId: string, plan: ScenarioPlan, question: strin
   return completeStructured(hintSchema,
     "Return JSON {\"hint\":\"string\"}. Give brief coaching structure and relevant considerations for the CURRENT question, without inventing CV achievements or a complete memorized answer. Max 100 words.",
     { plan, question, turns: turns.slice(-5) }, ownerId);
+}
+
+/** Evaluate one scenario only; the server, not the model, selects the next plan item. */
+export function decideScenarioFollowUp(ownerId:string, item:InterviewItem,
+ turns:{question:string,answer:string}[], depth:number, locale:string){
+ return completeStructured(interactiveDecisionSchema,
+  "Decide whether to follow up on the CURRENT interactive scenario. Return JSON {nextAction:\"follow_up\"|\"next_question\",question,competency,rationale,suggestedAnswer}. Use follow_up only when a meaningful gap remains against completionCriteria; ask a specific NEW question based on the actual answer and scenario goal. Use next_question when enough evidence was gathered, answers repeat, or the situation is exhausted. next_question will advance to the next planned item, not a model-selected topic. Generate suggestedAnswer 60-120 words (max 1800 chars) even if advancing. Never invent CV achievements. Interviewer locale: "+locale,
+  {item,depth,turns:turns.slice(-5)},ownerId);
 }
