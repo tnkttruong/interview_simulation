@@ -233,7 +233,7 @@ export async function completeStructured<T extends z.ZodTypeAny>(schema: T, task
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + process.env.OPENAI_API_KEY },
-      signal: AbortSignal.timeout(25000), cache: "no-store",
+      signal: AbortSignal.timeout((schema as unknown) === generatedPlanSchema ? 90000 : 25000), cache: "no-store",
       body: JSON.stringify({
         model: settings.model, temperature: 0.35, response_format: { type: "json_object" }, max_tokens: (schema as unknown) === generatedPlanSchema ? 11000 : 6500,
         messages: [{ role: "system", content: system }, { role: "user", content: taskPrompt }]
