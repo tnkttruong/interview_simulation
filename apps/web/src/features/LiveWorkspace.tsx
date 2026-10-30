@@ -7,11 +7,14 @@ import {extractPdf} from "./pdf-client";
 type Locale=keyof typeof voiceByLocale;
 const VALID_STEPS=["prepare","review","preflight","meeting","results"] as const;
 type Step=typeof VALID_STEPS[number];
-type Plan={role:string;level:string;overview:string;stages:{topic:string;questions:string[];suggestedAnswers?:string[]}[];rubric:{competency:string;criteria:string}[]};
+type PlannedItem={type:"standalone"|"interactive";prompt:string;goal:string;maxFollowUps:number;completionCriteria:string;suggestedAnswer:string};
+type Plan={role:string;level:string;overview:string;stages:{topic:string;questions:string[];suggestedAnswers?:string[];items?:PlannedItem[]}[];rubric:{competency:string;criteria:string}[]};
 type Scenario={id:string;role:string;jobDescription:string;focus:string;latestRevision:number;revisions:{revision:number;approvedAt:number|null;notes:string}[]};
 type Turn={id:string;sequence:number;question:string;answer:string;answerSource:string;originalStt:string|null};
 type Session={id:string;scenarioId?:string;mode:string;state:string;version:number;nextQuestion:string|null;nextQuestionId:string|null;
-  nextSuggestedAnswer?:string|null;turns:Turn[];speechConfig:string};
+  nextSuggestedAnswer?:string|null;nextQuestionType?:string|null;nextScenarioTitle?:string|null;
+  nextScenarioGoal?:string|null;nextFollowUpDepth?:number;nextFollowUpLimit?:number;
+  turns:Turn[];speechConfig:string};
 type Catalog={enabled:boolean;voices:Record<string,string[]>};
 const locales:{key:Locale,label:string}[]=[
  {key:"en-US",label:"English (US)"},{key:"en-GB",label:"English (UK)"},{key:"vi-VN",label:"Tiếng Việt"}
@@ -335,7 +338,8 @@ export default function LiveWorkspace({email}:{email:string}){
    })});
    setSession(s);sessionRef.current=s;changeStep("meeting",false,scenario.id,s.id);startKey.current=null;credential.current=null;
    const q=await readQuestion(s);
-   setMessage(q.nextQuestion?"AI interviewer is ready.":"Interview started. Generate the first question.");
+   if(q.state==="COMPLETED")changeStep("results",true,scenario.id,s.id);
+   setMessage(q.nextQuestion?"AI interviewer is ready.":"The planned interview has finished.");
    if(q.nextQuestion&&q.nextQuestionId&&lastSpokenQuestionIdRef.current!==q.nextQuestionId){
     lastSpokenQuestionIdRef.current=q.nextQuestionId;
     void speak(q,true);
@@ -406,6 +410,7 @@ export default function LiveWorkspace({email}:{email:string}){
     setSession(updated);sessionRef.current=updated;answerKey.current=null;setHint("");setShowSuggestedAnswer(false);setAnswer("");setRecognized("");setInterimText("");
     if(updated.turns.length<15){
      const nextQ=await readQuestion(updated);
+     if(nextQ.state==="COMPLETED")changeStep("results",true,session.scenarioId,session.id);
      if(nextQ.nextQuestion&&nextQ.nextQuestionId&&lastSpokenQuestionIdRef.current!==nextQ.nextQuestionId){
       lastSpokenQuestionIdRef.current=nextQ.nextQuestionId;
       void speak(nextQ,true,true);
@@ -635,8 +640,21 @@ export default function LiveWorkspace({email}:{email:string}){
           ) : (
             <>
               <h3>{plan.role} · {plan.level}</h3><p>{plan.overview}</p>
-              {plan.stages.map((s,i)=><div key={i}><h3>{i+1}. {s.topic}</h3>
-                <ol>{s.questions.map((q,j)=><li key={j}>{q}{s.suggestedAnswers?.[j]&&<details><summary>Suggested answer</summary><p>{s.suggestedAnswers[j]}</p></details>}</li>)}</ol></div>)}
+              <p className="muted small">Standalone: answer once, then the next planned question. Interactive: AI may ask scenario-specific follow-ups until the goal is met or the follow-up limit is reached.</p>
+              {plan.stages.map((stage,i)=><div key={i}><h3>{i+1}. {stage.topic}</h3>
+               <ol>{stage.questions.map((q,j)=>{
+                const item=stage.items?.[j];
+                return <li key={j} className="flow-script-item">
+                 <span className="flow-script-badge">{item?.type==="interactive"?"Interactive scenario":"Standalone"}</span>
+                 <div><strong>{q}</strong></div>
+                 {item?.type==="interactive"?<>
+                  <p className="muted small">Goal: {item.goal}</p>
+                  <p className="muted small">AI follow-ups: max {item.maxFollowUps}. Complete when: {item.completionCriteria}</p>
+                 </>:<p className="muted small">One answer → next scripted question</p>}
+                 {(item?.suggestedAnswer||stage.suggestedAnswers?.[j])&&<details><summary>Suggested answer</summary>
+                  <p>{item?.suggestedAnswer||stage.suggestedAnswers?.[j]}</p></details>}
+                </li>;
+               })}</ol></div>)}
               <h3>Evaluation rubric</h3><ul>{plan.rubric.map((rub,i)=><li key={i}><b>{rub.competency}:</b> {rub.criteria}</li>)}</ul>
               <button className="btn primary" onClick={approve} disabled={busy||!scenario}>Approve this revision →</button>
             </>
@@ -677,6 +695,11 @@ export default function LiveWorkspace({email}:{email:string}){
       </section></div>}
     {step==="meeting"&&<div className="meeting-layout"><section>
       <div className="meeting-video"><div className="avatar">👩🏻‍💼</div><strong>AI Interviewer · {session?.state}</strong>
+       {session?.nextQuestionType&&session.nextQuestionType!=="legacy"&&<p className="meeting-flow-status">
+        {session.nextQuestionType==="interactive"
+         ? `Interactive · ${session.nextScenarioTitle||"Scenario"} · Follow-ups ${session.nextFollowUpDepth||0}/${session.nextFollowUpLimit||0}`
+         : "Standalone · One answer, then next planned question"}
+       </p>}
        <p>{session?.nextQuestion||"No current question. Generate or resume the interview."}</p>
       </div>
       <div className="meeting-controls">
