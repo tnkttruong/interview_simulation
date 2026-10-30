@@ -109,6 +109,7 @@ export const liveSessionSources=sqliteTable("live_session_sources",{
  focus:text("focus").notNull(),
  cvText:text("cv_text").notNull(),
  cvFilename:text("cv_filename").notNull(),
+ planJson:text("plan_json").notNull().default(""),
  createdAt:integer("created_at").notNull()
 });
 export const liveQuestions = sqliteTable("live_questions",{
@@ -117,6 +118,12 @@ export const liveQuestions = sqliteTable("live_questions",{
   sequence:integer("sequence").notNull(),
   question:text("question").notNull(),
   suggestedAnswer:text("suggested_answer").notNull().default(""),
+  itemIndex:integer("item_index").notNull().default(-1),
+  questionType:text("question_type").notNull().default("legacy"),
+  followUpDepth:integer("follow_up_depth").notNull().default(0),
+  followUpLimit:integer("follow_up_limit").notNull().default(0),
+  scenarioTitle:text("scenario_title").notNull().default(""),
+  scenarioGoal:text("scenario_goal").notNull().default(""),
   competency:text("competency").notNull(),
   modelId:text("model_id").notNull(),
   promptVersion:text("prompt_version").notNull(),

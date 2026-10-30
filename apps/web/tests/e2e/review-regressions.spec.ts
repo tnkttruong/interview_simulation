@@ -58,10 +58,11 @@ test("concurrent AI creation is charged once, demo cannot revise live plan, list
  const q=await Promise.all(Array.from({length:6},()=>page.request.post("/api/live/sessions/"+session.id+"/question")));
  expect(q.every(r=>[200,409].includes(r.status()))).toBe(true);
  expect(q.some(r=>r.status()===200)).toBe(true);
- expect((await counts(page)).question-beforeQuestion.question).toBe(1);
+ expect((await counts(page)).question-beforeQuestion.question).toBe(0);
  const current=await (await page.request.get("/api/demo/sessions/"+session.id)).json();
  expect(current.nextQuestionId).toBeTruthy();
- expect(current.nextSuggestedAnswer).toContain("production traces");
+ expect(current.nextQuestionType).toBe("standalone");
+ expect(current.nextSuggestedAnswer).toContain("service boundaries");
  const beforeHint=await counts(page);
  const h=await Promise.all(Array.from({length:5},()=>page.request.post("/api/live/sessions/"+session.id+"/hint")));
  expect(h.every(r=>[200,409].includes(r.status()))).toBe(true);

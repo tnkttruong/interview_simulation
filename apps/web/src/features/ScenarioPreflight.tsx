@@ -206,7 +206,7 @@ export default function ScenarioPreflight({
       if (mode === "live") {
         router.push(`/live?step=meeting&sessionId=${data.id}`);
       } else {
-        router.push(`/?screen=meeting&sessionId=${data.id}`);
+        router.push(`/demo?screen=meeting&sessionId=${data.id}`);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start meeting");
@@ -228,7 +228,7 @@ export default function ScenarioPreflight({
           <Link href={`/scenarios/${scenarioId}`} className="live-entry">← Back to Scenario</Link>
           <Link href={`/live?step=preflight&scenarioId=${scenarioId}`} className="live-entry">✦ AI Interview (Live) →</Link>
           <Link href="/settings" style={{ color: "white", padding: 14 }}>⚙ AI Settings</Link>
-          <Link href="/?screen=scenario" style={{ color: "white", padding: 14 }}>⌂ All Scenarios</Link>
+          <Link href="/demo?screen=scenario" style={{ color: "white", padding: 14 }}>⌂ All Scenarios</Link>
         </nav>
         <div className="sidebar-bottom">
           <small>Scenario ID: {scenarioId.slice(0, 8)}…</small>
@@ -267,7 +267,7 @@ export default function ScenarioPreflight({
             <div className="panel">
               <h2>Scenario not found</h2>
               <p className="muted">Could not find scenario with ID: {scenarioId}</p>
-              <Link href="/?screen=scenario" className="btn primary">← Back to Scenarios</Link>
+              <Link href="/demo?screen=scenario" className="btn primary">← Back to Scenarios</Link>
             </div>
           ) : (
             <section>

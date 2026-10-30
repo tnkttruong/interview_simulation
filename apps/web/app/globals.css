@@ -105,3 +105,10 @@ footer{font-size:12px;color:#7a8496;padding:35px 0;text-align:center}.auth-page{
  .prior-session-row .list-button{flex-basis:100%}
  .prior-session-actions{justify-content:flex-start;padding-left:9px}
 }
+
+/* Distinguish one-shot questions and bounded interactive scenarios. */
+.flow-script-item{padding:12px 0;border-bottom:1px solid #e8edf6}
+.flow-script-badge{display:inline-block;background:#e9edff;color:#38499b;border-radius:12px;
+ font-size:12px;font-weight:700;padding:3px 9px;margin-bottom:8px}
+.flow-script-item p{margin:5px 0}
+.meeting-flow-status{font-size:13px!important;color:#d3e3ff;margin:9px 0!important}

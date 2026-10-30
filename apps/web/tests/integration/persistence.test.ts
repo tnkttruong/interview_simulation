@@ -51,15 +51,19 @@ it("reruns migrations after restart without losing persisted interview data", ()
     migrate();
     const reopened = new Database(path);
     try {
-      expect((reopened.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as {count:number}).count).toBe(6);
+      expect((reopened.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as {count:number}).count).toBe(8);
       expect((reopened.prepare("SELECT COUNT(*) AS count FROM interview_turns").get() as {count:number}).count).toBe(1);
       expect((reopened.prepare("SELECT COUNT(*) AS count FROM workflow_events").get() as {count:number}).count).toBe(1);
       expect((reopened.prepare("SELECT COUNT(*) AS count FROM live_questions").get() as {count:number}).count).toBe(0);
+      expect((reopened.prepare("PRAGMA table_info(live_questions)").all() as {name:string}[])
+        .some(column=>column.name==="item_index")).toBe(true);
       expect((reopened.prepare("PRAGMA table_info(live_questions)").all() as {name:string}[])
         .some(column=>column.name==="suggested_answer")).toBe(true);
       expect((reopened.prepare("SELECT COUNT(*) AS count FROM scenario_plans").get() as {count:number}).count).toBe(0);
       expect(reopened.prepare("SELECT question, answer FROM interview_turns").get())
         .toEqual({question:"Xin chào",answer:"Hello"});
+      expect((reopened.prepare("PRAGMA table_info(live_session_sources)").all() as {name:string}[])
+        .some(column=>column.name==="plan_json")).toBe(true);
       expect(reopened.prepare("SELECT job_description, cv_text, cv_filename FROM live_session_sources").get())
         .toEqual({job_description:"Original JD at meeting start",
           cv_text:"Original CV text for cloned meeting",cv_filename:"candidate.txt"});
