@@ -51,6 +51,9 @@ test("standalone → scenario opener → AI follow-up → AI advances → comple
  };
  const initial=await next();
  expect(initial.status()).toBe(200);
+ const firstLiveQuestion=await initial.json();
+ expect(firstLiveQuestion.nextSuggestedAnswer).toContain("service boundaries");
+ expect(firstLiveQuestion.nextFullAnswer).toContain("I start by identifying domain boundaries");
  expect((await get()).nextQuestion).toBe("Explain your service design decisions.");
  expect((await get()).nextQuestionType).toBe("standalone");
  await answer("I use clear boundaries, tests and explicit contracts.");
@@ -64,6 +67,8 @@ test("standalone → scenario opener → AI follow-up → AI advances → comple
  const followup=await get();
  expect(followup.nextQuestion).toBe("How did you improve database reliability in production?");
  expect(followup.nextFollowUpDepth).toBe(1);
+ expect(followup.nextSuggestedAnswer).toContain("diagnose slow queries");
+ expect(followup.nextFullAnswer).toContain("I would begin by measuring");
  await answer("I identified root cause and verified mitigation with monitoring.");
  const finished=await next();
  expect(finished.status()).toBe(200);
@@ -202,6 +207,9 @@ test("English UK default creates paired tables and executes English script",asyn
  expect(plan.bilingual.interviewerLocale).toBe("en-GB");
  expect(plan.stages[0].items[0].prompt).toBe("Explain your service design decisions.");
  expect(plan.bilingual.vietnamese.stages[0].items[0].prompt).toContain("Hãy giải thích");
+ expect(plan.stages[0].items[0].suggestedAnswer).toContain("I would define");
+ expect(plan.stages[0].items[0].fullAnswer).toContain("I start by identifying");
+ expect(plan.bilingual.vietnamese.stages[0].items[0].fullAnswer).toContain("Tôi sẽ bắt đầu");
  expect(plan.bilingual.vietnamese.stages.map((stage:{items:unknown[]})=>stage.items.length))
   .toEqual(plan.stages.map((stage:{items:unknown[]})=>stage.items.length));
  await page.goto("/live?step=review&scenarioId="+s.id);
@@ -209,6 +217,13 @@ test("English UK default creates paired tables and executes English script",asyn
  await expect(page.getByTestId("vietnamese-script").getByRole("table")).toBeVisible();
  await expect(page.getByTestId("translated-script").getByRole("table")).toBeVisible();
  await expect(page.getByText("Bảng dịch · English (UK)")).toBeVisible();
+ const viFull=page.getByTestId("vietnamese-script").getByTestId("full-answer").first();
+ await expect(viFull.getByText("Câu trả lời chính xác")).toBeVisible();
+ await viFull.locator("summary").click();
+ await expect(viFull.getByText(/Tôi sẽ bắt đầu bằng việc xác định/)).toBeVisible();
+ const enFull=page.getByTestId("translated-script").getByTestId("full-answer").first();
+ await enFull.locator("summary").click();
+ await expect(enFull.getByText(/I start by identifying domain boundaries/)).toBeVisible();
  await expect(page.getByTestId("vietnamese-script").getByText("Hãy giải thích các quyết định thiết kế dịch vụ của bạn.")).toBeVisible();
  expect((await page.request.patch("/api/demo/scenarios/"+s.id,{data:{action:"approve",expectedRevision:s.latestRevision}})).status()).toBe(200);
  const bad=await page.request.post("/api/live/sessions",{data:{
@@ -224,7 +239,9 @@ test("English UK default creates paired tables and executes English script",asyn
  const session=await started.json() as {id:string};
  const prepared=await page.request.post("/api/live/sessions/"+session.id+"/question");
  expect(prepared.status()).toBe(200);
- expect((await prepared.json()).nextQuestion).toBe("Explain your service design decisions.");
+ const preparedQuestion=await prepared.json();
+ expect(preparedQuestion.nextQuestion).toBe("Explain your service design decisions.");
+ expect(preparedQuestion.nextFullAnswer).toContain("I start by identifying");
  // Changing the saved default affects the NEXT script revision, not the active session.
  expect((await page.request.put("/api/me/ai-settings",{data:{
   provider:"api_key",model:"ci-mock-model",interviewerLocale:"vi-VN",
@@ -238,6 +255,8 @@ test("English UK default creates paired tables and executes English script",asyn
  const revised=await (await page.request.get("/api/live/scenarios/"+s.id)).json();
  expect(revised.plan.bilingual.interviewerLocale).toBe("vi-VN");
  expect(revised.plan.stages[0].items[0].prompt).toContain("Hãy giải thích");
+ expect(revised.plan.stages[0].items[0].fullAnswer).toContain("Tôi sẽ bắt đầu");
+ expect(revised.plan.bilingual.vietnamese.stages[0].items[0].fullAnswer).toContain("Tôi sẽ bắt đầu");
 });
 
 test("Vietnamese default produces two Vietnamese-aligned scripts",async({page})=>{
@@ -256,4 +275,5 @@ test("Vietnamese default produces two Vietnamese-aligned scripts",async({page})=
  const result=await (await page.request.get("/api/live/scenarios/"+scenario.id)).json();
  expect(result.plan.bilingual.interviewerLocale).toBe("vi-VN");
  expect(result.plan.stages[0].items[0].prompt).toBe(result.plan.bilingual.vietnamese.stages[0].items[0].prompt);
+ expect(result.plan.stages[0].items[0].fullAnswer).toBe(result.plan.bilingual.vietnamese.stages[0].items[0].fullAnswer);
 });
