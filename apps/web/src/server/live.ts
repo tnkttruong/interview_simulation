@@ -248,7 +248,7 @@ export async function prepareLiveQuestion(ownerId:string,id:string){
  }:null;
 
  function persist(data:{
-  question:string;suggestedAnswer:string;competency:string;modelId:string;
+  question:string;suggestedAnswer:string;fullAnswer:string;competency:string;modelId:string;
   itemIndex:number;questionType:"standalone"|"interactive"|"legacy";
   followUpDepth:number;scenarioTitle:string;scenarioGoal:string;followUpLimit:number;action:string
  }){
@@ -263,7 +263,7 @@ export async function prepareLiveQuestion(ownerId:string,id:string){
    if(row)return;
    tx.insert(liveQuestions).values({
     id:randomUUID(),sessionId:id,sequence,question:data.question,
-    competency:data.competency,suggestedAnswer:data.suggestedAnswer,
+    competency:data.competency,suggestedAnswer:data.suggestedAnswer,fullAnswer:data.fullAnswer,
     modelId:data.modelId,promptVersion,itemIndex:data.itemIndex,
     questionType:data.questionType,followUpDepth:data.followUpDepth,
     scenarioTitle:data.scenarioTitle,scenarioGoal:data.scenarioGoal,
@@ -314,6 +314,7 @@ export async function prepareLiveQuestion(ownerId:string,id:string){
   return persist({
    question:position.followUp?decision!.output.question:item.prompt,
    suggestedAnswer:position.followUp?decision!.output.suggestedAnswer:item.suggestedAnswer,
+   fullAnswer:position.followUp?decision!.output.fullAnswer:item.fullAnswer||"",
    competency:item.goal,
    modelId:position.followUp?decision!.modelId:"planned-script",
    itemIndex:position.itemIndex,questionType:item.type,followUpDepth:position.depth,
