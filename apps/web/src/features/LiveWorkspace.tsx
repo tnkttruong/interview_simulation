@@ -564,7 +564,7 @@ export default function LiveWorkspace({email}:{email:string}){
        </div>)}
      <p className="muted small">PDF text extraction happens in your browser. The extracted CV text is saved on this server for AI planning. Voice audio is processed by Azure but is not saved by this app.</p>
     </section></div>}
-    {step==="review"&&<div className="cols"><section className="panel">
+    {step==="review"&&<div className="review-layout"><section className="panel review-main">
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px",flexWrap:"wrap",gap:"8px"}}>
         <h2 style={{margin:0}}>2. Scenario details · revision {scenario?.latestRevision}</h2>
         <div style={{display:"flex",gap:"8px",alignItems:"center"}}>
@@ -612,18 +612,19 @@ export default function LiveWorkspace({email}:{email:string}){
                 <small className="muted">Tech stack / focus</small>
                 <p style={{margin:"2px 0"}}>{scenario.focus}</p>
               </div>}
-              <div>
-                <small className="muted">Job description</small>
-                <p style={{margin:"4px 0",whiteSpace:"pre-wrap",background:"#f8fafc",padding:"12px",borderRadius:"8px",border:"1px solid #e2e8f0",fontSize:"14px"}}>
-                  {scenario.jobDescription}
-                </p>
-              </div>
-              <div>
-                <small className="muted">CV text ({cvName})</small>
-                <p style={{margin:"4px 0",maxHeight:"120px",overflowY:"auto",whiteSpace:"pre-wrap",background:"#f8fafc",padding:"10px",borderRadius:"8px",border:"1px solid #e2e8f0",fontSize:"13px"}}>
-                  {cvText || "No CV text available"}
-                </p>
-              </div>
+              <details className="review-source-details">
+                <summary>View job description &amp; CV</summary>
+                <div className="review-source-content">
+                  <div>
+                    <small className="muted">Job description</small>
+                    <p className="review-source-text">{scenario.jobDescription}</p>
+                  </div>
+                  <div>
+                    <small className="muted">CV text ({cvName})</small>
+                    <p className="review-source-text review-cv-text">{cvText || "No CV text available"}</p>
+                  </div>
+                </div>
+              </details>
               <div style={{marginTop:"8px"}}>
                 <button className="btn primary" onClick={startPlanningReviewScript} disabled={busy}>
                   start planning review metting script
@@ -668,7 +669,7 @@ export default function LiveWorkspace({email}:{email:string}){
           )}
         </>
       )}
-     </section><section className="panel form-grid"><h2>Ask planner to revise</h2>
+     </section><section className="panel form-grid review-revision"><h2>Ask planner to revise</h2>
        <p>Revisions create a new unapproved version; previously approved versions remain immutable.</p>
        <textarea aria-label="Revision request" rows={5} value={feedback} maxLength={1000}
         placeholder="e.g. Focus more on system design and database incidents..."
