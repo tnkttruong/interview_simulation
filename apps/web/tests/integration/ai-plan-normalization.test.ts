@@ -129,11 +129,11 @@ describe("Complete answer compatibility and generation contract",()=>{
   const plan={...shared,stages,bilingual:{interviewerLocale:"en-US",vietnamese}};
   expect(generatedPlanSchema.safeParse(plan).success).toBe(true);
   expect(generatedPlanSchema.safeParse({...plan,stages:stages.map(stage=>({
-   ...stage,items:stage.items.map(({fullAnswer:_unused,...rest})=>rest)
+   ...stage,items:stage.items.map(item=>({...item,fullAnswer:undefined}))
   }))}).success).toBe(false);
   expect(generatedPlanSchema.safeParse({...plan,bilingual:{...plan.bilingual,vietnamese:{
    ...vietnamese,stages:vietnamese.stages.map(stage=>({
-    ...stage,items:stage.items.map(({fullAnswer:_unused,...rest})=>rest)
+    ...stage,items:stage.items.map(item=>({...item,fullAnswer:undefined}))
    }))
   }}}).success).toBe(false);
  });
