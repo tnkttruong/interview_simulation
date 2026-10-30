@@ -36,7 +36,8 @@ const server=createServer(async(req,res)=>{
  const result=content.includes("Create a realistic interview plan")?plan:
   content.includes("Revise this interview plan")?{...plan,overview:"Revised focus on database incidents."}:
   content.includes("Give brief coaching structure")?{hint:"Describe the challenge, your actions, measured results, and tradeoffs."}:
-  {nextAction:"follow_up",question:"How did you improve database reliability in production?",competency:"Reliability",
+  {nextAction:content.includes("I identified root cause and verified mitigation")?"next_question":"follow_up",
+   question:"How did you improve database reliability in production?",competency:"Reliability",
    rationale:"Grounded follow-up on role and historical examples",
    suggestedAnswer:"I would diagnose slow queries using production traces, review query plans and indexes, then validate safer migrations and alerting against an agreed latency target."};
  res.end(JSON.stringify({model:"ci-mock-model",choices:[{message:{content:JSON.stringify(result)}}]}));
