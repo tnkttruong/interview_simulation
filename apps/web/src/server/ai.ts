@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import { DomainError } from "@interview/core";
+import { DomainError, maxDemoTurns, maxFlowTurns } from "@interview/core";
 import { assertReady } from "./ai-settings";
 import { runCli } from "./ai-cli";
 
@@ -37,6 +37,8 @@ export const planSchema = z.object({
 });
 const generatedPlanSchema = planSchema.superRefine((plan, ctx) => {
   const items=plan.stages.flatMap(stage=>stage.items||[]);
+  if(maxFlowTurns(items)>maxDemoTurns)
+    ctx.addIssue({code:"custom",path:["stages"],message:"Plan exceeds the 15-answer budget including all possible follow-ups"});
   if(!items.some(item=>item.type==="standalone")||!items.some(item=>item.type==="interactive"))
     ctx.addIssue({code:"custom",path:["stages"],message:"Include both standalone and interactive questions"});
   plan.stages.forEach((stage,index)=>{
@@ -242,13 +244,13 @@ export async function completeStructured<T extends z.ZodTypeAny>(schema: T, task
 
 export function planScenario(ownerId: string, role: string, jobDescription: string, cvText: string, focus: string) {
   return completeStructured(generatedPlanSchema,
-    "Create a realistic interview plan. Return JSON {role,level,overview,stages:[{topic,items:[{type,prompt,goal,maxFollowUps,completionCriteria,suggestedAnswer}]}],rubric:[{competency,criteria}]}. Produce 2-4 stages with 2-3 items each and BOTH standalone and interactive types. Standalone: one exact question, maxFollowUps=0, then advance. Interactive: one opening situation or CV project deep dive, maxFollowUps=1-3; ask follow-ups only after hearing the candidate's answer. goal and completionCriteria describe the evidence to gather and when to leave the situation. suggestedAnswer 60-120 words, max 1800 characters. Ground in JD and CV; never invent achievements. Don't pre-generate branching follow-ups.",
+    "Create a realistic interview plan. Return JSON {role,level,overview,stages:[{topic,items:[{type,prompt,goal,maxFollowUps,completionCriteria,suggestedAnswer}]}],rubric:[{competency,criteria}]}. Produce 2-3 stages with 2 items each and BOTH standalone and interactive types. The TOTAL items plus all maxFollowUps MUST be at most 15 answers. Standalone: one exact question, maxFollowUps=0, then advance. Interactive: one opening situation or CV project deep dive, maxFollowUps=1-3; ask follow-ups only after hearing the candidate's answer. goal and completionCriteria describe the evidence to gather and when to leave the situation. suggestedAnswer 60-120 words, max 1800 characters. Ground in JD and CV; never invent achievements. Don't pre-generate branching follow-ups.",
     { role, jobDescription, cvText, focus }, ownerId);
 }
 
 export function revisePlan(ownerId: string, plan: ScenarioPlan, feedback: string, jobDescription: string, cvText: string) {
   return completeStructured(generatedPlanSchema,
-    "Revise this interview plan per feedback. Return complete JSON {role,level,overview,stages:[{topic,items:[{type,prompt,goal,maxFollowUps,completionCriteria,suggestedAnswer}]}],rubric:[{competency,criteria}]}. Preserve a mix of standalone and interactive questions. Standalone maxFollowUps=0; interactive maxFollowUps=1-3 with one opening question, explicit goal and completionCriteria. Generate one 60-120 word suggested answer per item, max 1800 characters. No prewritten branching follow-ups, never invent candidate achievements.",
+    "Revise this interview plan per feedback. Return complete JSON {role,level,overview,stages:[{topic,items:[{type,prompt,goal,maxFollowUps,completionCriteria,suggestedAnswer}]}],rubric:[{competency,criteria}]}. Preserve a mix of standalone and interactive questions. The TOTAL items plus all maxFollowUps MUST be at most 15; shorten the plan if needed. Standalone maxFollowUps=0; interactive maxFollowUps=1-3 with one opening question, explicit goal and completionCriteria. Generate one 60-120 word suggested answer per item, max 1800 characters. No prewritten branching follow-ups, never invent candidate achievements.",
     { plan, feedback, jobDescription, cvText }, ownerId);
 }
 

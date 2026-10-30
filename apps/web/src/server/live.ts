@@ -2,9 +2,9 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { and, count, desc, eq, gte } from "drizzle-orm";
 import { z } from "zod";
-import { DomainError, maxDemoTurns, nextFlowPosition, validateSpeechConfig } from "@interview/core";
+import { DomainError, isRelevantScenarioFollowUp, maxDemoTurns, nextFlowPosition, validateSpeechConfig } from "@interview/core";
 import { db } from "./db/client";
-import { interviewSessions,interviewTurns,liveHints,liveQuestions,liveSessionSources,scenarioPlans,scenarios,workflowEvents } from "./db/schema";
+import { interviewSessions,interviewTurns,liveHints,liveQuestions,liveSessionSources,scenarioPlans,scenarioRevisions,scenarios,workflowEvents } from "./db/schema";
 import { changeScenario,changeSession,createScenario,createSession,getScenario,getSession } from "./demo";
 import {decideScenarioFollowUp,hintSchema,nextInterviewQuestion,planScenario,planSchema,proposeHint,promptVersion,revisePlan} from "./ai";
 import {assertReady} from "./ai-settings";
@@ -99,6 +99,14 @@ export async function updateLiveScenario(ownerId:string,id:string,payload:unknow
  const data=updateLiveInput.parse(payload);
  const scenario=getScenario(ownerId,id);
  db.transaction((tx)=>{
+  const latest=tx.select().from(scenarios)
+   .where(and(eq(scenarios.id,id),eq(scenarios.ownerId,ownerId))).get();
+  if(!latest||latest.latestRevision!==scenario.latestRevision)
+   throw new DomainError("conflict","Scenario revision changed while editing");
+  const revision=tx.select().from(scenarioRevisions)
+   .where(and(eq(scenarioRevisions.scenarioId,id),eq(scenarioRevisions.revision,latest.latestRevision))).get();
+  if(revision?.approvedAt)
+   throw new DomainError("conflict","Approved revision is immutable; create an AI revision to edit the JD or CV");
   const toUpdate:Partial<typeof scenarios.$inferInsert>={};
   if(data.role!==undefined)toUpdate.role=data.role;
   if(data.jobDescription!==undefined)toUpdate.jobDescription=data.jobDescription;
@@ -128,6 +136,8 @@ export async function updateLiveScenario(ownerId:string,id:string,payload:unknow
 
 export async function planLiveScenario(ownerId:string,id:string,providedCvText?:string,instruction?:string){
  const scenario=getScenario(ownerId,id);
+ if(scenario.revisions.some(rev=>rev.revision===scenario.latestRevision&&rev.approvedAt))
+  throw new DomainError("conflict","Approved revision is immutable; use AI revision to create a new script");
  const existingPlan=db.select().from(scenarioPlans)
   .where(and(eq(scenarioPlans.scenarioId,id),eq(scenarioPlans.revision,scenario.latestRevision))).get();
  const cvText=providedCvText?.trim() || existingPlan?.cvText?.trim() || "No candidate CV provided; assess candidate based strictly on role requirements and job description.";
@@ -137,6 +147,14 @@ export async function planLiveScenario(ownerId:string,id:string,providedCvText?:
  return withAiBudget(ownerId,{"action":"plan","scenarioId":id,"revision":scenario.latestRevision,"role":scenario.role,"jd":scenario.jobDescription,"focus":focus,"cv":cvText},async()=>{
   const generated=await planScenario(ownerId,scenario.role,scenario.jobDescription,cvText,focus);
   db.transaction((tx)=>{
+   const latest=tx.select().from(scenarios)
+    .where(and(eq(scenarios.id,id),eq(scenarios.ownerId,ownerId))).get();
+   if(!latest||latest.latestRevision!==scenario.latestRevision)
+    throw new DomainError("conflict","Scenario revision changed during planning");
+   const revision=tx.select().from(scenarioRevisions)
+    .where(and(eq(scenarioRevisions.scenarioId,id),eq(scenarioRevisions.revision,latest.latestRevision))).get();
+   if(revision?.approvedAt)
+    throw new DomainError("conflict","Scenario approved during planning; use AI revision instead");
    const planRow=tx.select().from(scenarioPlans)
     .where(and(eq(scenarioPlans.scenarioId,id),eq(scenarioPlans.revision,scenario.latestRevision))).get();
    if(planRow){
@@ -204,7 +222,14 @@ export async function prepareLiveQuestion(ownerId:string,id:string){
  if(session.state!=="IN_PROGRESS")throw new DomainError("transition","Interview not in progress");
  const snapshot=getSession(ownerId,id);
  const sequence=snapshot.turns.length+1;
- if(sequence>maxDemoTurns)throw new DomainError("limit","Maximum live turns reached");
+ if(sequence>maxDemoTurns){
+  // Recover old live sessions that reached the limit before auto-completion.
+  try{return changeSession(ownerId,id,{action:"finish",expectedVersion:session.version});}
+  catch(error){
+   if(error instanceof DomainError&&error.kind==="conflict")return getSession(ownerId,id);
+   throw error;
+  }
+ }
  const existing=db.select().from(liveQuestions)
   .where(and(eq(liveQuestions.sessionId,id),eq(liveQuestions.sequence,sequence))).get();
  if(existing)return getSession(ownerId,id);
@@ -264,7 +289,13 @@ export async function prepareLiveQuestion(ownerId:string,id:string){
  const execute=async()=>{
   const decision=needsDecision?await decideScenarioFollowUp(
    ownerId,current!,snapshot.turns,prev!.depth,speech.interviewerLocale):null;
-  const position=nextFlowPosition(steps,prev,decision?.output.nextAction??null,
+  // Fallback to the next scripted item when AI drifts off-topic or repeats a question.
+  const chosenAction=decision?.output.nextAction==="follow_up"&&
+   !isRelevantScenarioFollowUp(
+    [current!.prompt,current!.goal,current!.completionCriteria].join(" "),
+    decision.output.question,snapshot.turns.map(turn=>turn.question))
+   ?"next_question":decision?.output.nextAction??null;
+  const position=nextFlowPosition(steps,prev,chosenAction,
    snapshot.turns.length,maxDemoTurns);
   if(position.kind==="finish"){
    const latest=owned(id,ownerId);

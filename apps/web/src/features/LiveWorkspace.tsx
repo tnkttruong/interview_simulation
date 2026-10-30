@@ -408,15 +408,15 @@ export default function LiveWorkspace({email}:{email:string}){
    try{
     const updated=await api<Session>("/api/demo/sessions/"+session.id+"/turns",{method:"POST",body:JSON.stringify(body)});
     setSession(updated);sessionRef.current=updated;answerKey.current=null;setHint("");setShowSuggestedAnswer(false);setAnswer("");setRecognized("");setInterimText("");
-    if(updated.turns.length<15){
+    if(updated.state==="COMPLETED"){
+     changeStep("results",true,session.scenarioId,session.id);
+    }else{
      const nextQ=await readQuestion(updated);
      if(nextQ.state==="COMPLETED")changeStep("results",true,session.scenarioId,session.id);
      if(nextQ.nextQuestion&&nextQ.nextQuestionId&&lastSpokenQuestionIdRef.current!==nextQ.nextQuestionId){
       lastSpokenQuestionIdRef.current=nextQ.nextQuestionId;
       void speak(nextQ,true,true);
      }
-    }else{
-     setMessage("15-turn limit reached; finish to review the transcript.");
     }
    }catch(e){
     const latest=await refreshSession(session.id);

@@ -245,6 +245,12 @@ export function submitAnswer(ownerId: UserId, id: string, payload: unknown) {
       originalStt:input.originalStt??null, createdAt:now()
     }).run();
     addEvent(tx,id,"answer.committed",{sequence,source:input.source,clientProvidedSpeech:input.source!=="typed",questionId:activeQuestion?.id??null});
+    if(session.mode==="live"&&sequence===maxDemoTurns){
+      // Save the final answer and session completion atomically.
+      const state=transition(session.state as SessionState,"finish");
+      tx.update(interviewSessions).set({state,version:session.version+1}).where(eq(interviewSessions.id,id)).run();
+      addEvent(tx,id,"interview.finish",{from:session.state,to:state,reason:"turn_limit"});
+    }
     return getSession(ownerId,id);
   });
 }
