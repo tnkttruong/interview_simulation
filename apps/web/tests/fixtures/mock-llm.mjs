@@ -91,7 +91,9 @@ const server=createServer(async(req,res)=>{
   content.includes("Revise this interview plan")?bilingualPlan({...plan,overview:"Revised focus on database incidents."},locale):
   content.includes("Give brief coaching structure")?{hint:"Describe the challenge, your actions, measured results, and tradeoffs."}:
   {nextAction:content.includes("I identified root cause and verified mitigation")?"next_question":"follow_up",
-   question:content.includes("OFF_TOPIC")?"What sport do you play on weekends?":"How did you improve database reliability in production?",competency:"Reliability",
+   question:content.includes("OFF_TOPIC")?"What sport do you play on weekends?":
+    content.includes('"depth":1')?"Which database safeguards prevented similar incidents afterward?":
+    "How did you improve database reliability in production?",competency:"Reliability",
    rationale:"Grounded follow-up on role and historical examples",
    suggestedAnswer:"I would diagnose slow queries using production traces, review query plans and indexes, then validate safer migrations and alerting against an agreed latency target."};
  res.end(JSON.stringify({model:"ci-mock-model",choices:[{message:{content:JSON.stringify(result)}}]}));

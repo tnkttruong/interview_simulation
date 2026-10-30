@@ -43,13 +43,13 @@ test("clone a past meeting's original JD/CV into a separate editable review",asy
   cvText:input.cvText,cvFilename:input.cvFilename,source:"snapshot"
  });
 
- // The original scenario may be edited after this meeting; cloning must not
- // silently inherit the newer JD/CV from that mutable scenario.
+ // Approved revisions are immutable: edits to the original JD/CV must be rejected.
+ // Cloning must retain the original meeting snapshot.
  const changed=await page.request.patch("/api/live/scenarios/"+scenario.id,{data:{
   role:"Changed role",jobDescription:"A completely different job description for another position.",
   cvText:"A replacement CV for another position and another role."
  }});
- expect(changed.status(),await changed.text()).toBe(200);
+ expect(changed.status(),await changed.text()).toBe(409);
  expect(await (await page.request.get(uri)).json()).toMatchObject({
   jobDescription:input.jobDescription,cvText:input.cvText,source:"snapshot"
  });
