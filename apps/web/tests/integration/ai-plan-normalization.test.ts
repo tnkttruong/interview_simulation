@@ -131,6 +131,11 @@ describe("Complete answer compatibility and generation contract",()=>{
   expect(generatedPlanSchema.safeParse({...plan,stages:stages.map(stage=>({
    ...stage,items:stage.items.map(item=>({...item,fullAnswer:undefined}))
   }))}).success).toBe(false);
+  expect(generatedPlanSchema.safeParse({...plan,stages:stages.map(stage=>({
+   ...stage,items:stage.items.map(item=>({
+    ...item,fullAnswer:"A good answer should explain transaction boundaries, authorization and idempotency. The candidate should describe database indexes and production observability instead of just naming tools."
+   }))
+  }))}).success).toBe(false);
   expect(generatedPlanSchema.safeParse({...plan,bilingual:{...plan.bilingual,vietnamese:{
    ...vietnamese,stages:vietnamese.stages.map(stage=>({
     ...stage,items:stage.items.map(item=>({...item,fullAnswer:undefined}))
