@@ -43,6 +43,7 @@ export default function ScenarioPreflight({
 
   const [interviewerLocale, setInterviewerLocale] = useState<Locale>("en-US");
   const [scriptLocale,setScriptLocale] = useState<Locale|null>(null);
+  const scriptLocaleRef=useRef<Locale|null>(null);
   const [candidateLocale, setCandidateLocale] = useState<Locale>("vi-VN");
   const [voice, setVoice] = useState<string>(voiceByLocale["en-US"][0]);
   const [consent, setConsent] = useState(false);
@@ -66,6 +67,7 @@ export default function ScenarioPreflight({
       if(planResponse.ok){
        const info=await planResponse.json() as {plan?:{bilingual?:{interviewerLocale:Locale}}};
        const selected=info.plan?.bilingual?.interviewerLocale||null;
+       scriptLocaleRef.current=selected;
        setScriptLocale(selected);
        if(selected){setInterviewerLocale(selected);setVoice(voiceByLocale[selected][0]);}
       }
@@ -89,7 +91,7 @@ export default function ScenarioPreflight({
       .then((d: { settings?: { interviewerLocale: Locale; candidateSttLocale: Locale; voiceId: string } }) => {
         if (d.settings) {
           if (d.settings.interviewerLocale && voiceByLocale[d.settings.interviewerLocale]) {
-            if(!scriptLocale){
+            if(!scriptLocaleRef.current){
               setInterviewerLocale(d.settings.interviewerLocale);
               setVoice(d.settings.voiceId || voiceByLocale[d.settings.interviewerLocale][0]);
             }
@@ -100,7 +102,7 @@ export default function ScenarioPreflight({
         }
       })
       .catch(() => {});
-  }, [scriptLocale]);
+  }, []);
 
   function onInterviewerLocaleChange(val: Locale) {
     setInterviewerLocale(val);
