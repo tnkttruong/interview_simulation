@@ -64,7 +64,7 @@ export const planSchema = z.object({
     vietnamese:vietnamesePlanSchema
   }).optional()
 });
-const generatedPlanSchema = planSchema.superRefine((plan, ctx) => {
+export const generatedPlanSchema = planSchema.superRefine((plan, ctx) => {
   const items=plan.stages.flatMap(stage=>stage.items||[]);
   if(!plan.bilingual){
     ctx.addIssue({code:"custom",path:["bilingual"],message:"Generated scripts require a Vietnamese table and a translation"});
