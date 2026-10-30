@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { createAuthClient } from "better-auth/react";
 import { extractPdf } from "./pdf-client";
+import BilingualPlanTables,{type PlanReviewData} from "./BilingualPlanTables";
 
 type Revision = { revision: number; approvedAt: number | null; notes: string };
 type Scenario = {
@@ -14,13 +15,7 @@ type Scenario = {
   latestRevision: number;
   revisions: Revision[];
 };
-type Plan = {
-  role: string;
-  level: string;
-  overview: string;
-  stages: { topic: string; questions: string[]; suggestedAnswers?: string[] }[];
-  rubric: { competency: string; criteria: string }[];
-};
+type Plan = PlanReviewData;
 
 const client = createAuthClient();
 
@@ -454,6 +449,7 @@ export default function ScenarioDetail({
                               ↺ Lên lại kịch bản
                             </button>
                           </div>
+                          {plan.bilingual ? <BilingualPlanTables plan={plan}/> : <>
                           <p><b>Overview:</b> {plan.overview}</p>
                           <ol>
                             {plan.stages.map((st, i) => (
@@ -480,6 +476,7 @@ export default function ScenarioDetail({
                               </ul>
                             </>
                           )}
+                          </>}
                         </div>
                       )}
                     </>

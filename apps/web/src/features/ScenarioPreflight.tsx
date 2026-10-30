@@ -42,6 +42,7 @@ export default function ScenarioPreflight({
   const [notice, setNotice] = useState("");
 
   const [interviewerLocale, setInterviewerLocale] = useState<Locale>("en-US");
+  const [scriptLocale,setScriptLocale] = useState<Locale|null>(null);
   const [candidateLocale, setCandidateLocale] = useState<Locale>("vi-VN");
   const [voice, setVoice] = useState<string>(voiceByLocale["en-US"][0]);
   const [consent, setConsent] = useState(false);
@@ -61,6 +62,13 @@ export default function ScenarioPreflight({
       if (!res.ok) throw new Error("Scenario not found");
       const data = await res.json();
       setScenario(data);
+      const planResponse=await fetch(`/api/live/scenarios/${scenarioId}`,{credentials:"same-origin"});
+      if(planResponse.ok){
+       const info=await planResponse.json() as {plan?:{bilingual?:{interviewerLocale:Locale}}};
+       const selected=info.plan?.bilingual?.interviewerLocale||null;
+       setScriptLocale(selected);
+       if(selected){setInterviewerLocale(selected);setVoice(voiceByLocale[selected][0]);}
+      }
       if (typeof window !== "undefined") {
         sessionStorage.setItem("last_scenario_id", data.id);
       }
@@ -81,8 +89,10 @@ export default function ScenarioPreflight({
       .then((d: { settings?: { interviewerLocale: Locale; candidateSttLocale: Locale; voiceId: string } }) => {
         if (d.settings) {
           if (d.settings.interviewerLocale && voiceByLocale[d.settings.interviewerLocale]) {
-            setInterviewerLocale(d.settings.interviewerLocale);
-            setVoice(d.settings.voiceId || voiceByLocale[d.settings.interviewerLocale][0]);
+            if(!scriptLocale){
+              setInterviewerLocale(d.settings.interviewerLocale);
+              setVoice(d.settings.voiceId || voiceByLocale[d.settings.interviewerLocale][0]);
+            }
           }
           if (d.settings.candidateSttLocale && voiceByLocale[d.settings.candidateSttLocale]) {
             setCandidateLocale(d.settings.candidateSttLocale);
@@ -90,7 +100,7 @@ export default function ScenarioPreflight({
         }
       })
       .catch(() => {});
-  }, []);
+  }, [scriptLocale]);
 
   function onInterviewerLocaleChange(val: Locale) {
     setInterviewerLocale(val);
@@ -294,13 +304,14 @@ export default function ScenarioPreflight({
                 <div className="panel form-grid">
                   <label>
                     AI interviewer language
-                    <select value={interviewerLocale} onChange={(e) => onInterviewerLocaleChange(e.target.value as Locale)}>
+                    <select value={scriptLocale||interviewerLocale} disabled={scriptLocale!==null} onChange={(e) => onInterviewerLocaleChange(e.target.value as Locale)}>
                       <option value="en-US">English (US)</option>
                       <option value="en-GB">English (UK)</option>
                       <option value="vi-VN">Tiếng Việt</option>
                     </select>
                   </label>
 
+                  {scriptLocale&&<p className="muted small">Approved script language: {scriptLocale}. To change it, update Default interviewer language in Settings and generate a new revision.</p>}
                   <label>
                     AI interviewer voice
                     <select value={voice} onChange={(e) => setVoice(e.target.value)}>
