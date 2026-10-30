@@ -26,6 +26,11 @@ test("standalone → scenario opener → AI follow-up → AI advances → comple
  const approval=await page.request.patch("/api/demo/scenarios/"+scenario.id,{
   data:{action:"approve",expectedRevision:scenario.latestRevision}});
  expect(approval.status()).toBe(200);
+ // Neither regeneration nor CV edits can mutate an approved revision.
+ const regenerate=await page.request.post("/api/live/scenarios/"+scenario.id+"/plan",{data:{}});
+ expect(regenerate.status()).toBe(409);
+ const edit=await page.request.patch("/api/live/scenarios/"+scenario.id,{data:{cvText:"A changed CV after approval must be rejected."}});
+ expect(edit.status()).toBe(409);
  const begin=await page.request.post("/api/live/sessions",{data:{
   scenarioId:scenario.id,revision:scenario.latestRevision,requestKey:randomUUID(),speech
  }});
@@ -107,4 +112,74 @@ test("server enforces max follow-up depth even when AI asks to continue",async({
  expect(final.state).toBe("COMPLETED");
  expect(final.nextQuestionId).toBeNull();
  expect(final.turns).toHaveLength(count);
+});
+
+test("fifteenth answer completes the live session atomically",async({page})=>{
+ await signUp(page);
+ const created=await page.request.post("/api/live/scenarios",{data:{
+  role:"Backend Engineer",jobDescription:"TURN_LIMIT: Handle uptime and production reliability systems.",
+  cvText:"I built APIs and investigated production reliability incidents.",planImmediately:true
+ }});
+ expect(created.status(),await created.text()).toBe(201);
+ const s=await created.json() as {id:string;latestRevision:number};
+ const approval=await page.request.patch("/api/demo/scenarios/"+s.id,{data:{action:"approve",expectedRevision:s.latestRevision}});
+ expect(approval.status()).toBe(200);
+ const started=await page.request.post("/api/live/sessions",{data:{
+  scenarioId:s.id,revision:s.latestRevision,requestKey:randomUUID(),speech
+ }});
+ expect(started.status()).toBe(201);
+ const {id}=await started.json() as {id:string};
+ type State={state:string;nextQuestionId:string|null;turns:unknown[]};
+ let session=await (await page.request.get("/api/demo/sessions/"+id)).json() as State;
+ for(let i=0;i<15;i++){
+  if(!session.nextQuestionId){
+   const prepared=await page.request.post("/api/live/sessions/"+id+"/question");
+   expect(prepared.status(),await prepared.text()).toBe(200);
+   session=await prepared.json() as State;
+  }
+  expect(session.nextQuestionId).toBeTruthy();
+  const result=await page.request.post("/api/demo/sessions/"+id+"/turns",{data:{
+   clientTurnId:randomUUID(),expectedTurnSequence:i+1,expectedQuestionId:session.nextQuestionId,
+   answer:"I investigated the production metrics and documented the outcome.",source:"typed"
+  }});
+  expect(result.status(),await result.text()).toBe(201);
+  session=await result.json() as State;
+ }
+ expect(session.turns).toHaveLength(15);
+ expect(session.state).toBe("COMPLETED");
+ expect(session.nextQuestionId).toBeNull();
+ const events=await (await page.request.get("/api/demo/sessions/"+id+"?include=events")).json() as {type:string;metadata:string}[];
+ expect(events.some(x=>x.type==="interview.finish"&&JSON.parse(x.metadata).reason==="turn_limit")).toBe(true);
+});
+
+test("off-topic AI follow-up falls back to the next scripted step",async({page})=>{
+ await signUp(page);
+ const created=await page.request.post("/api/live/scenarios",{data:{
+  role:"Backend Engineer",jobDescription:"Investigate production database issues and reliability.",
+  cvText:"I use PostgreSQL in production and troubleshoot incidents.",planImmediately:true
+ }});
+ expect(created.status()).toBe(201);
+ const s=await created.json() as {id:string;latestRevision:number};
+ expect((await page.request.patch("/api/demo/scenarios/"+s.id,{data:{action:"approve",expectedRevision:s.latestRevision}})).status()).toBe(200);
+ const started=await page.request.post("/api/live/sessions",{data:{
+  scenarioId:s.id,revision:s.latestRevision,requestKey:randomUUID(),speech
+ }});
+ const {id}=await started.json() as {id:string};
+ const prepare=async()=>page.request.post("/api/live/sessions/"+id+"/question");
+ const answer=async(text:string)=>{
+  const current=await (await page.request.get("/api/demo/sessions/"+id)).json() as {nextQuestionId:string;turns:unknown[]};
+  const r=await page.request.post("/api/demo/sessions/"+id+"/turns",{data:{
+   clientTurnId:randomUUID(),expectedTurnSequence:current.turns.length+1,
+   expectedQuestionId:current.nextQuestionId,answer:text,source:"typed"
+  }});
+  expect(r.status(),await r.text()).toBe(201);
+ };
+ expect((await prepare()).status()).toBe(200);
+ await answer("I applied service contracts.");
+ expect((await prepare()).status()).toBe(200);
+ await answer("OFF_TOPIC: please evaluate my database incident.");
+ expect((await prepare()).status()).toBe(200);
+ const session=await (await page.request.get("/api/demo/sessions/"+id)).json() as {state:string;turns:unknown[]};
+ expect(session.state).toBe("COMPLETED");
+ expect(session.turns).toHaveLength(2);
 });

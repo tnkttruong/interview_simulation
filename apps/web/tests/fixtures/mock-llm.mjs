@@ -18,6 +18,18 @@ const plan={
  rubric:[{competency:"Reliability",criteria:"Uses measurable safeguards and incident lessons."},
          {competency:"Communication",criteria:"Explains tradeoffs clearly."}]
 };
+// Exactly fifteen answers if the final interactive scenario uses its one follow-up.
+const limitPlan={...plan,stages:[
+ {topic:"Service reliability",items:Array.from({length:10},(_,i)=>({
+  ...plan.stages[0].items[0],prompt:`Service design question ${i+1}: how do you ensure production reliability?`
+ }))},
+ {topic:"Operations and incidents",items:[
+  ...Array.from({length:3},(_,i)=>({
+   ...plan.stages[0].items[0],prompt:`Reliability check ${i+1}: how do you improve production systems?`
+  })),
+  {...plan.stages[1].items[0],maxFollowUps:1}
+ ]}
+]};
 const counts={plan:0,revise:0,question:0,hint:0};
 const server=createServer(async(req,res)=>{
  res.setHeader("Content-Type","application/json");
@@ -33,11 +45,11 @@ const server=createServer(async(req,res)=>{
   content.includes("Revise this interview plan")?"revise":
   content.includes("Give brief coaching structure")?"hint":"question";
  counts[kind]++;
- const result=content.includes("Create a realistic interview plan")?plan:
+ const result=content.includes("Create a realistic interview plan")?(content.includes("TURN_LIMIT")?limitPlan:plan):
   content.includes("Revise this interview plan")?{...plan,overview:"Revised focus on database incidents."}:
   content.includes("Give brief coaching structure")?{hint:"Describe the challenge, your actions, measured results, and tradeoffs."}:
   {nextAction:content.includes("I identified root cause and verified mitigation")?"next_question":"follow_up",
-   question:"How did you improve database reliability in production?",competency:"Reliability",
+   question:content.includes("OFF_TOPIC")?"What sport do you play on weekends?":"How did you improve database reliability in production?",competency:"Reliability",
    rationale:"Grounded follow-up on role and historical examples",
    suggestedAnswer:"I would diagnose slow queries using production traces, review query plans and indexes, then validate safer migrations and alerting against an agreed latency target."};
  res.end(JSON.stringify({model:"ci-mock-model",choices:[{message:{content:JSON.stringify(result)}}]}));

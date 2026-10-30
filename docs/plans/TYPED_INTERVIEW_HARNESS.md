@@ -28,3 +28,9 @@ The client cannot forge item indexes or skip scenarios; all planning state is se
 ### Known limitation
 
 This is an interview simulation harness, not a validated grading engine. It does not infer a certified skills score. The decision to move to the next item is an AI judgment constrained by server-side limits, not proof that the competency has been mastered.
+
+## Review hardening
+
+- Approved revisions are immutable via live scenario update and plan regeneration APIs. To make changes, create a fresh AI revision. The server rechecks approval under the write transaction to close approval/planning races. Active sessions have their own plan JSON snapshot.
+- New AI-generated plans are validated against the 15-answer worst-case budget (scripted questions plus all allowed follow-ups). Existing plans remain readable. Live sessions complete atomically when the fifteenth answer is committed.
+- A deterministic, conservative lexical guard rejects clearly unrelated or repeated AI follow-ups and advances the scripted cursor. It is not a substitute for semantic evaluation of interview quality.

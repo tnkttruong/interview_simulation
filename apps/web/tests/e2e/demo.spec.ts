@@ -19,7 +19,7 @@ test("requires latest scenario approval and explicit transcript consent", async 
   await expect(page.getByRole("heading",{name:"Review & approve"})).toBeVisible();
 
   await page.getByRole("button",{name:/Language & voice/}).first().click();
-  await expect(page.getByRole("button",{name:"Start Demo meeting →"})).toBeDisabled();
+  await expect(page.getByRole("button",{name:"Start meeting →"})).toBeDisabled();
 
   // Output locale must NOT alter candidate STT locale.
   await expect(page.getByLabel("Your microphone input language")).toHaveValue("vi-VN");
@@ -29,6 +29,7 @@ test("requires latest scenario approval and explicit transcript consent", async 
 
   await page.getByRole("button",{name:"Scenario review"}).first().click();
   await page.getByRole("button",{name:/Approve latest revision/}).click();
+  await page.getByRole("link",{name:/Continue to preflight/}).click();
   await expect(page.getByRole("button",{name:"Start Demo meeting →"})).toBeDisabled();
   await page.getByRole("checkbox",{name:/explicitly consent/}).check();
   await page.getByRole("button",{name:"Start Demo meeting →"}).click();
@@ -55,6 +56,7 @@ test("a new meeting requires fresh consent and old session evidence does not lea
   await page.getByRole("button",{name:"New interview",exact:true}).click();
   await page.getByRole("button",{name:/Create demo scenario/}).click();
   await page.getByRole("button",{name:/Approve latest revision/}).click();
+  await page.getByRole("link",{name:/Continue to preflight/}).click();
   await page.getByRole("checkbox",{name:/explicitly consent/}).check();
   await page.getByRole("button",{name:"Start Demo meeting →"}).click();
   await page.getByLabel("Type answer (STT fallback / offline demo)").fill("Question 1 answer");
@@ -63,9 +65,11 @@ test("a new meeting requires fresh consent and old session evidence does not lea
   await page.getByRole("button",{name:"Review transcript & workflow events"}).click();
   await expect(page.getByText(/answer.committed/)).toBeVisible();
   await page.getByRole("button",{name:"Scenario review"}).first().click();
-  await page.getByRole("button",{name:"Browse scenarios"}).click();
+  // A reloaded demo workspace may already display the scenario list.
+  const browse=page.getByRole("button",{name:"Browse scenarios"});
+  if(await browse.isVisible())await browse.click();
   await page.getByRole("button",{name:/Senior Backend Engineer · v1/}).click();
-  await page.getByRole("button",{name:"Continue to preflight"}).click();
+  await page.getByRole("link",{name:/Continue to preflight/}).click();
   const consent=page.getByRole("checkbox",{name:/explicitly consent/});
   await expect(consent).not.toBeChecked();
   await expect(page.getByRole("button",{name:"Start Demo meeting →"})).toBeDisabled();

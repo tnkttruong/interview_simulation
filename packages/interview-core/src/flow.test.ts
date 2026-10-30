@@ -28,3 +28,17 @@ describe("typed interview cursor",()=>{
   expect(nextFlowPosition(steps,{itemIndex:1,depth:1,type:"interactive"},"follow_up",15,15)).toEqual({kind:"finish"});
  });
 });
+
+// Guard policies are pure and are exercised independently of provider responses.
+import {maxFlowTurns,isRelevantScenarioFollowUp} from "./flow";
+describe("script budget and scenario guard",()=>{
+ it("counts all possible follow-up turns",()=>{
+  expect(maxFlowTurns(steps)).toBe(5);
+ });
+ it("rejects off-topic or repeated follow-ups",()=>{
+  const context="Walk through a database incident. Assess latency investigation and prevention";
+  expect(isRelevantScenarioFollowUp(context,"How did you monitor database latency?")).toBe(true);
+  expect(isRelevantScenarioFollowUp(context,"What sport do you play on weekends?")).toBe(false);
+  expect(isRelevantScenarioFollowUp(context,"How did you monitor database latency?",["How did you monitor database latency?"])).toBe(false);
+ });
+});
