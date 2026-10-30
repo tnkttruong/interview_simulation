@@ -168,6 +168,8 @@ export function getSession(ownerId:UserId, id:string) {
     nextFollowUpLimit: upcoming?.followUpLimit ?? 0,
     nextSuggestedAnswer: session.state==="IN_PROGRESS" && turns.length<maxDemoTurns && session.mode==="live"
       ? upcoming?.suggestedAnswer || null : null,
+    nextFullAnswer: session.state==="IN_PROGRESS" && turns.length<maxDemoTurns && session.mode==="live"
+      ? upcoming?.fullAnswer || null : null,
     nextQuestion: session.state === "IN_PROGRESS" && turns.length < maxDemoTurns
       ? (session.mode === "live" ? upcoming?.question ?? null : getDemoQuestion(turns.length, speech.interviewerLocale)) : null };
 }

@@ -457,7 +457,17 @@ export default function ScenarioDetail({
                                 <b>{st.topic}</b>
                                 <ul style={{ marginTop: "4px" }}>
                                   {st.questions.map((q, qi) => (
-                                    <li key={qi} style={{ margin: "4px 0" }}>{q}{st.suggestedAnswers?.[qi] && <details><summary>Suggested answer</summary><p>{st.suggestedAnswers[qi]}</p></details>}</li>
+                                    <li key={qi} style={{ margin: "4px 0" }}>
+                                      {q}
+                                      {(st.items?.[qi]?.suggestedAnswer || st.suggestedAnswers?.[qi]) && <details>
+                                        <summary>Suggested answer</summary>
+                                        <p>{st.items?.[qi]?.suggestedAnswer || st.suggestedAnswers?.[qi]}</p>
+                                      </details>}
+                                      {st.items?.[qi]?.fullAnswer && <details data-testid="full-answer">
+                                        <summary>Complete answer</summary>
+                                        <p style={{ whiteSpace: "pre-wrap" }}>{st.items[qi].fullAnswer}</p>
+                                      </details>}
+                                    </li>
                                   ))}
                                 </ul>
                               </li>

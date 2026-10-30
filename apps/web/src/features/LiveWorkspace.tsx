@@ -12,7 +12,7 @@ type Plan=PlanReviewData;
 type Scenario={id:string;role:string;jobDescription:string;focus:string;latestRevision:number;revisions:{revision:number;approvedAt:number|null;notes:string}[]};
 type Turn={id:string;sequence:number;question:string;answer:string;answerSource:string;originalStt:string|null};
 type Session={id:string;scenarioId?:string;mode:string;state:string;version:number;nextQuestion:string|null;nextQuestionId:string|null;
-  nextSuggestedAnswer?:string|null;nextQuestionType?:string|null;nextScenarioTitle?:string|null;
+  nextSuggestedAnswer?:string|null;nextFullAnswer?:string|null;nextQuestionType?:string|null;nextScenarioTitle?:string|null;
   nextScenarioGoal?:string|null;nextFollowUpDepth?:number;nextFollowUpLimit?:number;
   turns:Turn[];speechConfig:string};
 type Catalog={enabled:boolean;voices:Record<string,string[]>};
@@ -69,6 +69,7 @@ export default function LiveWorkspace({email}:{email:string}){
  const [interimText,setInterimText]=useState("");
  const [answer,setAnswer]=useState(""),[recognized,setRecognized]=useState(""),[hint,setHint]=useState("");
  const [showSuggestedAnswer,setShowSuggestedAnswer]=useState(false);
+ const [showFullAnswer,setShowFullAnswer]=useState(false);
  const [busy,setBusy]=useState(false),[message,setMessage]=useState(""),[error,setError]=useState("");
  const [history,setHistory]=useState<{id:string;state:string;mode:string;createdAt:number}[]>([]);
  const startKey=useRef<string|null>(null),answerKey=useRef<string|null>(null);
@@ -308,7 +309,7 @@ export default function LiveWorkspace({email}:{email:string}){
  }
  async function readQuestion(s:Session){
   const next=await api<Session>("/api/live/sessions/"+s.id+"/question",{method:"POST"});
-  setSession(next);sessionRef.current=next;setHint("");setShowSuggestedAnswer(false);setRecognized("");setAnswer("");answerKey.current=null;
+  setSession(next);sessionRef.current=next;setHint("");setShowSuggestedAnswer(false);setShowFullAnswer(false);setRecognized("");setAnswer("");answerKey.current=null;
   return next;
  }
  async function previewSelectedVoice(){
@@ -372,7 +373,7 @@ export default function LiveWorkspace({email}:{email:string}){
    setRole(source.role);setJd(source.jobDescription);setFocus(source.focus);
    setCvText(source.cvText);setCvName(source.cvFilename||"pasted-cv.txt");
    setSession(null);sessionRef.current=null;setConsent(false);setFeedback("");
-   setHint("");setAnswer("");setRecognized("");setShowSuggestedAnswer(false);
+   setHint("");setAnswer("");setRecognized("");setShowSuggestedAnswer(false);setShowFullAnswer(false);
    answerKey.current=null;startKey.current=null;
    await loadPlan(cloned.id);
    setIsEditing(true);
@@ -411,7 +412,7 @@ export default function LiveWorkspace({email}:{email:string}){
     ...(recognized?{originalStt:recognized}:{})};
    try{
     const updated=await api<Session>("/api/demo/sessions/"+session.id+"/turns",{method:"POST",body:JSON.stringify(body)});
-    setSession(updated);sessionRef.current=updated;answerKey.current=null;setHint("");setShowSuggestedAnswer(false);setAnswer("");setRecognized("");setInterimText("");
+    setSession(updated);sessionRef.current=updated;answerKey.current=null;setHint("");setShowSuggestedAnswer(false);setShowFullAnswer(false);setAnswer("");setRecognized("");setInterimText("");
     if(updated.state==="COMPLETED"){
      changeStep("results",true,session.scenarioId,session.id);
     }else{
@@ -660,6 +661,8 @@ export default function LiveWorkspace({email}:{email:string}){
                  </>:<p className="muted small">One answer → next scripted question</p>}
                  {(item?.suggestedAnswer||stage.suggestedAnswers?.[j])&&<details><summary>Suggested answer</summary>
                   <p>{item?.suggestedAnswer||stage.suggestedAnswers?.[j]}</p></details>}
+                  {item?.fullAnswer&&<details data-testid="full-answer"><summary>Complete answer</summary>
+                   <p style={{whiteSpace:"pre-wrap"}}>{item.fullAnswer}</p></details>}
                 </li>;
                })}</ol></div>)}
               <h3>Evaluation rubric</h3><ul>{plan.rubric.map((rub,i)=><li key={i}><b>{rub.competency}:</b> {rub.criteria}</li>)}</ul>
@@ -733,6 +736,9 @@ export default function LiveWorkspace({email}:{email:string}){
        <button className="btn secondary" disabled={!session?.nextSuggestedAnswer} onClick={()=>setShowSuggestedAnswer(value=>!value)}>
         {showSuggestedAnswer?"Hide suggested answer":"Show suggested answer"}
        </button>
+       <button className="btn secondary" disabled={!session?.nextFullAnswer} onClick={()=>setShowFullAnswer(value=>!value)}>
+        {showFullAnswer?"Hide complete answer":"Show complete answer"}
+       </button>
        {session?.state==="IN_PROGRESS"?<button className="btn secondary" onClick={()=>action("pause")} disabled={busy}>Pause</button>:
         <button className="btn secondary" onClick={()=>action("resume")} disabled={busy||!["PAUSED","INTERRUPTED"].includes(session?.state||"")}>Resume</button>}
        <button className="btn danger" onClick={()=>action("finish")} disabled={busy||!["PAUSED","INTERRUPTED","IN_PROGRESS"].includes(session?.state||"")}>Finish</button>
@@ -740,6 +746,10 @@ export default function LiveWorkspace({email}:{email:string}){
       {showSuggestedAnswer&&session?.nextSuggestedAnswer&&<div className="panel hint" data-testid="suggested-answer">
        <h3>Suggested answer · practice reference</h3><p style={{whiteSpace:"pre-wrap"}}>{session.nextSuggestedAnswer}</p>
        <p className="muted small">Adapt this to your own experience; do not claim details that are not yours.</p>
+      </div>}
+      {showFullAnswer&&session?.nextFullAnswer&&<div className="panel hint" data-testid="complete-answer">
+       <h3>Complete answer · practice reference</h3><p style={{whiteSpace:"pre-wrap"}}>{session.nextFullAnswer}</p>
+       <p className="muted small">A model response, not a single universal answer. Adapt examples to your actual experience.</p>
       </div>}
       {hint&&<div className="panel hint"><h3>Private AI coaching hint</h3><p>{hint}</p><p className="muted small">Hint exposure is logged in workflow evidence.</p></div>}
       <div className="panel form-grid">

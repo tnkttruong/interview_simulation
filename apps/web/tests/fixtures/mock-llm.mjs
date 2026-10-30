@@ -6,13 +6,15 @@ const plan={
    type:"standalone",prompt:"Explain your service design decisions.",
    goal:"Assess service boundaries and API contracts",maxFollowUps:0,
    completionCriteria:"Answer is submitted",
-   suggestedAnswer:"I would define explicit service boundaries, clear API contracts, reliable retries, and observability before scaling."
+   suggestedAnswer:"I would define explicit service boundaries, clear API contracts, reliable retries, and observability before scaling.",
+   fullAnswer:"I start by identifying domain boundaries and clear API contracts. For an order-processing feature, I would keep the handler small, isolate multi-step business rules in a service and use a transaction to preserve consistency. I would apply an idempotency key to handle retries safely. After adding request and integration tests, I would review logs and latency metrics to validate that the design works under expected load."
   }]},
   {topic:"Production incident deep dive",items:[{
    type:"interactive",prompt:"Walk through a database reliability incident from your project.",
    goal:"Assess incident triage, investigation, tradeoffs and prevention",maxFollowUps:2,
    completionCriteria:"Candidate explains investigation, root cause and preventative action",
-   suggestedAnswer:"I would diagnose slow queries using production traces, review query plans and indexes, then validate safer migrations and alerting against an agreed latency target."
+   suggestedAnswer:"I would diagnose slow queries using production traces, review query plans and indexes, then validate safer migrations and alerting against an agreed latency target.",
+   fullAnswer:"If a database query became slow in production, I would compare its latency with the baseline and inspect the slow-query log. Then I would run EXPLAIN ANALYZE for the SQL, check indexes and lock contention, and choose a low-risk mitigation. I would test the change using realistic data, prepare a rollback path and monitor p95 latency and error rates after deployment. Finally, I would add a regression test."
   }]}
  ],
  rubric:[{competency:"Reliability",criteria:"Uses measurable safeguards and incident lessons."},
@@ -36,11 +38,11 @@ const vi={
  stages:[
   {topic:"Kiến trúc backend",items:[{prompt:"Hãy giải thích các quyết định thiết kế dịch vụ của bạn.",
    goal:"Đánh giá ranh giới dịch vụ và hợp đồng API",completionCriteria:"Ứng viên trả lời một lần",
-   suggestedAnswer:"Tôi sẽ xác định rõ ranh giới dịch vụ, hợp đồng API, chiến lược thử lại và xây dựng cơ chế giám sát trước khi mở rộng hệ thống."}]},
+   suggestedAnswer:"Tôi sẽ xác định rõ ranh giới dịch vụ, hợp đồng API, chiến lược thử lại và xây dựng cơ chế giám sát trước khi mở rộng hệ thống.",fullAnswer:"Tôi sẽ bắt đầu bằng việc xác định ranh giới nghiệp vụ và hợp đồng API giữa các dịch vụ. Chẳng hạn với luồng tạo đơn hàng, tôi giữ controller gọn, chuyển nghiệp vụ nhiều bước vào service và dùng transaction để bảo vệ tính nhất quán. Tôi bổ sung idempotency key để tránh tạo đơn trùng khi retry, cùng các constraint phù hợp ở PostgreSQL. Sau đó tôi viết request specs và theo dõi logs, latency để kiểm chứng thiết kế."}]},
   {topic:"Xử lý sự cố production",items:[{prompt:"Hãy kể lại một sự cố liên quan đến độ tin cậy của cơ sở dữ liệu trong dự án.",
    goal:"Đánh giá khả năng điều tra nguyên nhân và phòng ngừa sự cố",
    completionCriteria:"Ứng viên trình bày quá trình điều tra, nguyên nhân và hướng phòng ngừa",
-   suggestedAnswer:"Tôi sẽ phân tích truy vấn chậm bằng dữ liệu giám sát, kiểm tra chỉ mục và kế hoạch truy vấn, sau đó xác minh cải tiến bằng các chỉ số độ trễ."}]}
+   suggestedAnswer:"Tôi sẽ phân tích truy vấn chậm bằng dữ liệu giám sát, kiểm tra chỉ mục và kế hoạch truy vấn, sau đó xác minh cải tiến bằng các chỉ số độ trễ.",fullAnswer:"Nếu database production bị chậm, trước tiên tôi kiểm tra biểu đồ latency, error rate và slow-query log để khoanh vùng sự cố. Sau đó tôi chạy EXPLAIN ANALYZE, kiểm tra index, các transaction bị khóa và tần suất truy vấn. Tôi đề xuất phương án có rủi ro thấp nhất, đo lại trên dữ liệu thử nghiệm rồi triển khai có rollback. Cuối cùng tôi theo dõi p95 latency và bổ sung test hồi quy để tránh tái diễn."}]}
  ],
  rubric:[{competency:"Độ tin cậy",criteria:"Có biện pháp phòng ngừa và rút kinh nghiệm từ sự cố."},
          {competency:"Giao tiếp",criteria:"Trình bày rõ ràng những đánh đổi kỹ thuật."}]
@@ -52,7 +54,8 @@ function bilingualPlan(script,locale){
    prompt:"Hãy mô tả cách bạn bảo đảm độ tin cậy của hệ thống ở câu số "+(j+1)+".",
    goal:"Đánh giá kinh nghiệm vận hành và thiết kế hệ thống",
    completionCriteria:"Ứng viên trình bày cách giải quyết vấn đề",
-   suggestedAnswer:"Tôi sẽ quan sát các chỉ số vận hành, tìm nguyên nhân lỗi và kiểm tra hiệu quả của phương án sửa chữa trước khi đưa vào production."
+   suggestedAnswer:"Tôi sẽ quan sát các chỉ số vận hành, tìm nguyên nhân lỗi và kiểm tra hiệu quả của phương án sửa chữa trước khi đưa vào production.",
+   fullAnswer:"Tôi bắt đầu bằng cách xem latency, error rate và logs để tìm phạm vi ảnh hưởng. Nếu vấn đề nằm ở PostgreSQL, tôi sẽ chạy EXPLAIN ANALYZE, xem index và transaction đang giữ khóa. Sau khi xác định nguyên nhân, tôi thử giải pháp trên môi trường an toàn, chuẩn bị phương án rollback rồi triển khai thận trọng. Tôi tiếp tục theo dõi chỉ số sau deploy và bổ sung regression test để kiểm soát rủi ro."
   })
  }))};
  if(locale==="vi-VN"){
@@ -95,7 +98,7 @@ const server=createServer(async(req,res)=>{
     content.includes('"depth":1')?"Which database safeguards prevented similar incidents afterward?":
     "How did you improve database reliability in production?",competency:"Reliability",
    rationale:"Grounded follow-up on role and historical examples",
-   suggestedAnswer:"I would diagnose slow queries using production traces, review query plans and indexes, then validate safer migrations and alerting against an agreed latency target."};
+   suggestedAnswer:"I would diagnose slow queries using production traces, review query plans and indexes, then validate safer migrations and alerting against an agreed latency target.",fullAnswer:"I would begin by measuring the change in response time and errors for the affected API. Next I would inspect database slow-query logs, run EXPLAIN ANALYZE and check whether missing indexes or lock contention explain the latency. I would select a reversible fix, test it against realistic load and monitor p95 latency after the rollout. Finally I would document the incident and add automated checks to catch the regression early."};
  res.end(JSON.stringify({model:"ci-mock-model",choices:[{message:{content:JSON.stringify(result)}}]}));
 });
 server.listen(8787,()=>console.log("Mock LLM ready on 8787"));

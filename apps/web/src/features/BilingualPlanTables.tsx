@@ -4,18 +4,18 @@ import {Fragment} from "react";
 export type PlanReviewData={
  role:string;level:string;overview:string;
  stages:{topic:string;questions:string[];suggestedAnswers?:string[];
-  items?:{type:"standalone"|"interactive";prompt:string;goal:string;maxFollowUps:number;completionCriteria:string;suggestedAnswer:string}[]}[];
+  items?:{type:"standalone"|"interactive";prompt:string;goal:string;maxFollowUps:number;completionCriteria:string;suggestedAnswer:string;fullAnswer?:string}[]}[];
  rubric:{competency:string;criteria:string}[];
  bilingual?:{
   interviewerLocale:"en-US"|"en-GB"|"vi-VN";
   vietnamese:{
    role:string;level:string;overview:string;
-   stages:{topic:string;items:{prompt:string;goal:string;completionCriteria:string;suggestedAnswer:string}[]}[];
+   stages:{topic:string;items:{prompt:string;goal:string;completionCriteria:string;suggestedAnswer:string;fullAnswer?:string}[]}[];
    rubric:{competency:string;criteria:string}[]
   }
  }
 };
-type ReviewRow={type?:string;prompt:string;goal?:string;completionCriteria?:string;maxFollowUps?:number;suggestedAnswer?:string};
+type ReviewRow={type?:string;prompt:string;goal?:string;completionCriteria?:string;maxFollowUps?:number;suggestedAnswer?:string;fullAnswer?:string};
 type RowStage={topic:string;items:ReviewRow[]};
 
 function PlanTable({title,description,overview,stages,rubric,isVietnamese,testId}:{
@@ -35,7 +35,9 @@ function PlanTable({title,description,overview,stages,rubric,isVietnamese,testId
       <strong>{item.prompt}</strong>
       {item.goal&&<p className="muted small">{isVietnamese?"Mục tiêu":"Goal"}: {item.goal}</p>}
       {item.type==="interactive"&&<p className="muted small">{isVietnamese?"Hỏi tiếp tối đa":"Max follow-ups"}: {item.maxFollowUps}. {isVietnamese?"Kết thúc khi":"Complete when"}: {item.completionCriteria}</p>}
-     </td><td>{item.suggestedAnswer&&<details><summary>{isVietnamese?"Câu trả lời gợi ý":"Suggested answer"}</summary><p>{item.suggestedAnswer}</p></details>}</td>
+     </td><td>{item.suggestedAnswer&&<details><summary>{isVietnamese?"Câu trả lời gợi ý":"Suggested answer"}</summary><p>{item.suggestedAnswer}</p></details>}
+      {item.fullAnswer&&<details data-testid="full-answer"><summary>{isVietnamese?"Câu trả lời chính xác":"Complete answer"}</summary>
+       <p>{item.fullAnswer}</p></details>}</td>
     </tr>)}
    </Fragment>)}</tbody>
   </table></div>
