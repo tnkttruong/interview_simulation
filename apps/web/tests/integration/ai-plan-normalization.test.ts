@@ -63,3 +63,29 @@ describe("AI plan parsing and normalization", () => {
     expect(parsed.success).toBe(true);
   });
 });
+
+describe("Bilingual plan compatibility",()=>{
+ it("retains Vietnamese and translated versions through normalization",()=>{
+  const english={
+   role:"Backend Engineer",level:"Senior",overview:"Assess distributed systems.",
+   stages:[{topic:"Architecture",items:[{
+    type:"standalone",prompt:"How do you design distributed backend services?",
+    goal:"Assess architecture decisions",maxFollowUps:0,
+    completionCriteria:"Candidate answers the question",
+    suggestedAnswer:"I evaluate reliability, failure modes, data consistency and operational costs before choosing service boundaries."
+   }]}],
+   rubric:[{competency:"Design",criteria:"Explains system tradeoffs clearly"}]
+  };
+  const vietnamese={role:"Kỹ sư Backend",level:"Cấp cao",overview:"Đánh giá hệ thống phân tán.",
+   stages:[{topic:"Kiến trúc",items:[{
+    prompt:"Bạn thiết kế các dịch vụ backend phân tán như thế nào?",
+    goal:"Đánh giá khả năng thiết kế hệ thống",
+    completionCriteria:"Ứng viên trả lời câu hỏi",
+    suggestedAnswer:"Tôi cân nhắc độ tin cậy, các tình huống lỗi và tính nhất quán dữ liệu trước khi đưa ra quyết định."
+   }]}],rubric:[{competency:"Thiết kế",criteria:"Giải thích rõ các đánh đổi của hệ thống"}]};
+  const parsed=planSchema.parse(normalizePlan({...english,bilingual:{interviewerLocale:"en-US",vietnamese}}));
+  expect(parsed.bilingual?.interviewerLocale).toBe("en-US");
+  expect(parsed.bilingual?.vietnamese.stages[0].items[0].prompt).toContain("Bạn thiết kế");
+  expect(parsed.stages[0].questions[0]).toBe("How do you design distributed backend services?");
+ });
+});

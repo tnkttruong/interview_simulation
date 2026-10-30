@@ -112,3 +112,18 @@ footer{font-size:12px;color:#7a8496;padding:35px 0;text-align:center}.auth-page{
  font-size:12px;font-weight:700;padding:3px 9px;margin-bottom:8px}
 .flow-script-item p{margin:5px 0}
 .meeting-flow-status{font-size:13px!important;color:#d3e3ff;margin:9px 0!important}
+
+/* Aligned Vietnamese and interviewer-language interview tables. */
+.bilingual-script-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start;margin:16px 0 24px}
+.bilingual-script-panel{min-width:0;border:1px solid #e2e8f0;border-radius:10px;padding:14px;background:#fff}
+.bilingual-script-panel h3{margin:0 0 8px}
+.bilingual-script-overview{padding:10px 12px;background:#f8fafc;border-radius:6px;font-size:14px}
+.bilingual-script-scroll{max-width:100%;overflow-x:auto}
+.bilingual-script-table{border-collapse:collapse;width:100%;min-width:430px;font-size:13px}
+.bilingual-script-table th,.bilingual-script-table td{border:1px solid #e2e8f0;padding:9px;text-align:left;vertical-align:top;overflow-wrap:anywhere}
+.bilingual-script-table thead th{background:#eff4fc}
+.bilingual-script-table .bilingual-script-stage th{background:#f8fafc;font-weight:700}
+.bilingual-script-table td details p{white-space:pre-wrap;margin-top:8px}
+.bilingual-script-type{font-size:11px;font-weight:700;color:#394a86;margin-bottom:5px}
+.bilingual-script-rubric{padding-left:18px;font-size:13px}
+@media(max-width:960px){.bilingual-script-columns{grid-template-columns:minmax(0,1fr)}}

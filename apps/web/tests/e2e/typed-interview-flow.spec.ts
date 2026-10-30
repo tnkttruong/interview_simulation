@@ -183,3 +183,77 @@ test("off-topic AI follow-up falls back to the next scripted step",async({page})
  expect(session.state).toBe("COMPLETED");
  expect(session.turns).toHaveLength(2);
 });
+
+test("English UK default creates paired tables and executes English script",async({page})=>{
+ await signUp(page);
+ const settings=await page.request.put("/api/me/ai-settings",{data:{
+  provider:"api_key",model:"ci-mock-model",interviewerLocale:"en-GB",
+  candidateSttLocale:"vi-VN",voiceId:"en-GB-SoniaNeural"
+ }});
+ expect(settings.status(),await settings.text()).toBe(200);
+ const created=await page.request.post("/api/live/scenarios",{data:{
+  role:"Backend Engineer",jobDescription:"Build reliable services and manage production database incidents.",
+  cvText:"I designed Go services and monitored PostgreSQL in production.",planImmediately:true
+ }});
+ expect(created.status(),await created.text()).toBe(201);
+ const s=await created.json() as {id:string;latestRevision:number};
+ const result=await (await page.request.get("/api/live/scenarios/"+s.id)).json();
+ const plan=result.plan;
+ expect(plan.bilingual.interviewerLocale).toBe("en-GB");
+ expect(plan.stages[0].items[0].prompt).toBe("Explain your service design decisions.");
+ expect(plan.bilingual.vietnamese.stages[0].items[0].prompt).toContain("Hãy giải thích");
+ expect(plan.bilingual.vietnamese.stages.map((stage:{items:unknown[]})=>stage.items.length))
+  .toEqual(plan.stages.map((stage:{items:unknown[]})=>stage.items.length));
+ await page.goto("/live?step=review&scenarioId="+s.id);
+ await expect(page.getByTestId("bilingual-plan")).toBeVisible();
+ await expect(page.getByTestId("vietnamese-script").getByRole("table")).toBeVisible();
+ await expect(page.getByTestId("translated-script").getByRole("table")).toBeVisible();
+ await expect(page.getByText("Bảng dịch · English (UK)")).toBeVisible();
+ await expect(page.getByTestId("vietnamese-script").getByText("Hãy giải thích các quyết định thiết kế dịch vụ của bạn.")).toBeVisible();
+ expect((await page.request.patch("/api/demo/scenarios/"+s.id,{data:{action:"approve",expectedRevision:s.latestRevision}})).status()).toBe(200);
+ const bad=await page.request.post("/api/live/sessions",{data:{
+  scenarioId:s.id,revision:s.latestRevision,requestKey:randomUUID(),
+  speech:{...speech,interviewerLocale:"en-US",interviewerVoiceId:"en-US-JennyNeural"}
+ }});
+ expect(bad.status()).toBe(400);
+ const started=await page.request.post("/api/live/sessions",{data:{
+  scenarioId:s.id,revision:s.latestRevision,requestKey:randomUUID(),
+  speech:{...speech,interviewerLocale:"en-GB",interviewerVoiceId:"en-GB-SoniaNeural"}
+ }});
+ expect(started.status(),await started.text()).toBe(201);
+ const session=await started.json() as {id:string};
+ const prepared=await page.request.post("/api/live/sessions/"+session.id+"/question");
+ expect(prepared.status()).toBe(200);
+ expect((await prepared.json()).nextQuestion).toBe("Explain your service design decisions.");
+ // Changing the saved default affects the NEXT script revision, not the active session.
+ expect((await page.request.put("/api/me/ai-settings",{data:{
+  provider:"api_key",model:"ci-mock-model",interviewerLocale:"vi-VN",
+  candidateSttLocale:"vi-VN",voiceId:"vi-VN-HoaiMyNeural"
+ }})).status()).toBe(200);
+ const revision=await page.request.post("/api/live/scenarios/"+s.id+"/revise",{data:{
+  feedback:"Emphasize root-cause analysis and produce Vietnamese interviewer questions",
+  expectedRevision:s.latestRevision
+ }});
+ expect(revision.status(),await revision.text()).toBe(200);
+ const revised=await (await page.request.get("/api/live/scenarios/"+s.id)).json();
+ expect(revised.plan.bilingual.interviewerLocale).toBe("vi-VN");
+ expect(revised.plan.stages[0].items[0].prompt).toContain("Hãy giải thích");
+});
+
+test("Vietnamese default produces two Vietnamese-aligned scripts",async({page})=>{
+ await signUp(page);
+ const settings=await page.request.put("/api/me/ai-settings",{data:{
+  provider:"api_key",model:"ci-mock-model",interviewerLocale:"vi-VN",
+  candidateSttLocale:"en-US",voiceId:"vi-VN-HoaiMyNeural"
+ }});
+ expect(settings.status()).toBe(200);
+ const created=await page.request.post("/api/live/scenarios",{data:{
+  role:"Backend Engineer",jobDescription:"Operate reliable services and investigate database incidents.",
+  cvText:"I created Go services and tuned PostgreSQL databases in production.",planImmediately:true
+ }});
+ expect(created.status(),await created.text()).toBe(201);
+ const scenario=await created.json() as {id:string};
+ const result=await (await page.request.get("/api/live/scenarios/"+scenario.id)).json();
+ expect(result.plan.bilingual.interviewerLocale).toBe("vi-VN");
+ expect(result.plan.stages[0].items[0].prompt).toBe(result.plan.bilingual.vietnamese.stages[0].items[0].prompt);
+});

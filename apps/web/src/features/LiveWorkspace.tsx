@@ -4,11 +4,11 @@ import Link from "next/link";
 import {voiceByLocale} from "@interview/core";
 import {checkMicrophone,checkSpeaker,say,startContinuousListening,type ContinuousListener,type SpeechCredential} from "./azure-client";
 import {extractPdf} from "./pdf-client";
+import BilingualPlanTables,{type PlanReviewData} from "./BilingualPlanTables";
 type Locale=keyof typeof voiceByLocale;
 const VALID_STEPS=["prepare","review","preflight","meeting","results"] as const;
 type Step=typeof VALID_STEPS[number];
-type PlannedItem={type:"standalone"|"interactive";prompt:string;goal:string;maxFollowUps:number;completionCriteria:string;suggestedAnswer:string};
-type Plan={role:string;level:string;overview:string;stages:{topic:string;questions:string[];suggestedAnswers?:string[];items?:PlannedItem[]}[];rubric:{competency:string;criteria:string}[]};
+type Plan=PlanReviewData;
 type Scenario={id:string;role:string;jobDescription:string;focus:string;latestRevision:number;revisions:{revision:number;approvedAt:number|null;notes:string}[]};
 type Turn={id:string;sequence:number;question:string;answer:string;answerSource:string;originalStt:string|null};
 type Session={id:string;scenarioId?:string;mode:string;state:string;version:number;nextQuestion:string|null;nextQuestionId:string|null;
@@ -75,6 +75,10 @@ export default function LiveWorkspace({email}:{email:string}){
  const credential=useRef<{value:SpeechCredential;expires:number}|null>(null);
  const visibleVoices=catalog?.enabled?catalog.voices[interviewerLocale]||[]:[...voiceByLocale[interviewerLocale]];
  const approved=!!scenario?.revisions.find(x=>x.revision===scenario.latestRevision)?.approvedAt;
+ useEffect(()=>{
+  const locale=plan?.bilingual?.interviewerLocale;
+  if(locale){setInterviewerLocale(locale);setVoice(voiceByLocale[locale][0]);}
+ },[plan?.bilingual?.interviewerLocale]);
 
  const scenarioRef=useRef<Scenario|null>(scenario);
  scenarioRef.current=scenario;
@@ -639,6 +643,7 @@ export default function LiveWorkspace({email}:{email:string}){
             </div>
           ) : (
             <>
+              {plan.bilingual ? <BilingualPlanTables plan={plan}/> : <>
               <h3>{plan.role} · {plan.level}</h3><p>{plan.overview}</p>
               <p className="muted small">Standalone: answer once, then the next planned question. Interactive: AI may ask scenario-specific follow-ups until the goal is met or the follow-up limit is reached.</p>
               {plan.stages.map((stage,i)=><div key={i}><h3>{i+1}. {stage.topic}</h3>
@@ -657,6 +662,7 @@ export default function LiveWorkspace({email}:{email:string}){
                 </li>;
                })}</ol></div>)}
               <h3>Evaluation rubric</h3><ul>{plan.rubric.map((rub,i)=><li key={i}><b>{rub.competency}:</b> {rub.criteria}</li>)}</ul>
+              </>}
               <button className="btn primary" onClick={approve} disabled={busy||!scenario}>Approve this revision →</button>
             </>
           )}
@@ -671,8 +677,9 @@ export default function LiveWorkspace({email}:{email:string}){
       </section></div>}
     {step==="preflight"&&<div className="cols"><section className="panel form-grid">
       <h2>3. Meeting preflight</h2>
-      <label>AI interviewer language<select value={interviewerLocale} onChange={e=>changeLanguage(e.target.value as Locale)}>
+      <label>AI interviewer language<select value={plan?.bilingual?.interviewerLocale||interviewerLocale} disabled={!!plan?.bilingual} onChange={e=>changeLanguage(e.target.value as Locale)}>
        {locales.map(l=><option key={l.key} value={l.key}>{l.label}</option>)}</select></label>
+      {plan?.bilingual&&<p className="muted small">Script language: {plan.bilingual.interviewerLocale}. Change Default interviewer language in Settings and generate a new revision to switch languages.</p>}
       <label>AI interviewer voice<select value={voice} onChange={e=>setVoice(e.target.value)}>
        {visibleVoices.map(v=><option key={v} value={v}>{v}</option>)}</select></label>
       <button className="btn secondary" type="button" disabled={busy||!catalog?.enabled||!visibleVoices.includes(voice)}
