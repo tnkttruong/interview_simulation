@@ -14,7 +14,7 @@ export default function SampleAudioPlayer({ email }: { email: string }) {
   // Each fixed sample is synthesized at most once per mounted page.
   // URLs are intentionally not persisted: refresh => fresh Azure TTS request on next Play.
   const audioCache = useRef<Map<AudioSampleId, string>>(new Map());
-  const [cacheRevision, setCacheRevision] = useState(0);
+  const [cachedIds, setCachedIds] = useState<AudioSampleId[]>([]);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -62,7 +62,7 @@ export default function SampleAudioPlayer({ email }: { email: string }) {
       if (!mounted.current) return;
       const url = URL.createObjectURL(blob);
       audioCache.current.set(id, url);
-      setCacheRevision(count => count + 1);
+      setCachedIds([...audioCache.current.keys()]);
       setAudioUrl(url);
       setSelected(id);
       requestAnimationFrame(() => {
@@ -120,7 +120,7 @@ export default function SampleAudioPlayer({ email }: { email: string }) {
               </div>
             </div>)}
           </div>
-          <p className="muted small">Azure TTS is called on first Play for each clip. {cacheRevision >= 0 ? audioCache.current.size : 0} sample(s) cached in this tab; refresh clears the cache and the next Play calls Azure again. Azure usage charges may apply.</p>
+          <p className="muted small">Azure TTS is called on first Play for each clip. {cachedIds.length} sample(s) cached in this tab; refresh clears the cache and the next Play calls Azure again. Azure usage charges may apply.</p>
         </section>
         <section className="panel">
           <h2>Audio playback</h2>
