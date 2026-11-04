@@ -239,10 +239,14 @@ export default function DualAudioTest({ email }: { email: string }) {
                 },
               }));
             },
-            onStatus: message => patch(source, { azureStatus: message }),
+            onStatus: message => {
+              patch(source, { azureStatus: message });
+              if (message === "Azure session stopped") void stopAzure(source);
+            },
             onAudioFrames: frames => patch(source, { pcmFrames: frames }),
             onError: message => {
               patch(source, { error: message, listening: false, azureStatus: "Azure error" });
+              void stopAzure(source);
             },
           });
           if (unmounted.current || version !== runVersion.current || captures.current[source] !== capture) {
@@ -330,6 +334,14 @@ export default function DualAudioTest({ email }: { email: string }) {
           <p>2. Connect your microphone, then share the actual meeting <strong>Chrome Tab</strong> with <strong>Share tab audio</strong> enabled.</p>
           <p>3. Confirm both volume meters move independently. Click <strong>Start Azure STT</strong>; connecting a source alone does not start transcription.</p>
           <p>4. Need an audio source? <Link href="/settings/audio-samples" target="_blank" rel="noopener noreferrer">Open the sample audio player in a new tab</Link>. Share <strong>that tab</strong> with audio enabled.</p>
+          <div className="device-row">
+            <button className="btn primary" disabled={busy || !diagnostics?.enabled || !diagnostics.azure.configured ||
+              (!channels.candidate.connected && !channels.interviewer.connected) ||
+              (channels.candidate.listening && channels.interviewer.listening)}
+              onClick={() => void startAzure()}>▶ Start Azure STT &amp; transcribe</button>
+            <button className="btn secondary" disabled={busy || (!channels.candidate.listening && !channels.interviewer.listening)}
+              onClick={() => void stopAllAzure()}>Stop STT</button>
+          </div>
           <p className="muted small">Chrome requires video permission for tab capture, but this page ignores the video track. Only tab audio is used. Remote tab audio does not identify individual reviewers.</p>
           <p className="muted small">Provider tests: <strong>{diagnostics ? (diagnostics.enabled ? "Enabled" : "Disabled") : "Checking…"}</strong> ·
             Azure: <strong>{diagnostics?.azure.configured ? "Configured" : "Not configured"}</strong>
