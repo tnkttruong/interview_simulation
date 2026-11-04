@@ -12,11 +12,11 @@ AZURE_SPEECH_KEY=your-key
 ENABLE_PROVIDER_TESTS=true
 ```
 
-Restart the Next.js server after changing environment values. The diagnostic token API is authenticated, throttled, and disabled by default. **Turn ENABLE_PROVIDER_TESTS off after testing** on any shared/public installation.
+Restart the Next.js server after changing environment values. The STT diagnostic token API is authenticated, throttled, and disabled by default. The sample TTS endpoint is authenticated and throttled but accepts only fixed built-in sample IDs. **Turn ENABLE_PROVIDER_TESTS off after testing** on any shared/public installation.
 
 ## Test procedure
 
-For a repeatable recording, open **/settings/audio-samples** in a second Chrome tab (authenticated). It offers fixed questions synthesized by Azure TTS and played through a normal HTML audio element. Capture the **Sample audio player** tab from the audio-test page, start Azure STT, and then press Play in the sample tab. The player and STT need `ENABLE_PROVIDER_TESTS=true` and Azure credentials; Azure may bill for each new synthesis. Replaying an already loaded sample does not invoke TTS again.
+For a repeatable recording, open **/settings/audio-samples** in a second Chrome tab (authenticated). It offers fixed questions synthesized by Azure TTS and played through a normal HTML audio element. Capture the **Sample audio player** tab from the audio-test page, start Azure STT, and then press Play in the sample tab. The player calls the authenticated Azure **Text-to-Speech** endpoint on the first Play of each sample. It only needs Azure credentials; it does **not** require `ENABLE_PROVIDER_TESTS=true` (that flag is still required for the STT diagnostics). Audio clips are cached **in the browser page only**, so repeated Play uses no new TTS call; refreshing clears the cache and the next Play calls Azure again. Azure may bill for each new synthesis.
 
 The test page now sends explicit PCM through an Azure push stream, and displays **PCM frames sent** plus **Azure status** for each channel. Connection alone does not begin transcription: press **Start Azure STT**.
 
