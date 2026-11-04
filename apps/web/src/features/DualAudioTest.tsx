@@ -377,7 +377,7 @@ async function startInputStreamRecognition(stream: MediaStream, locale: Locale, 
     callbacks.partial(event.result?.text || "");
   recognizer.recognized = (_: unknown, event: { result?: { reason: number; text?: string } }) => {
     const result = event.result;
-    if (result?.reason === sdk.ResultReason.RecognizedSpeech && result.text?.trim()) {
+    if (result && result.reason === sdk.ResultReason.RecognizedSpeech && typeof result.text === "string" && result.text.trim()) {
       const text = result.text.trim();
       accumulated += (accumulated ? " " : "") + text;
       callbacks.final(text);
