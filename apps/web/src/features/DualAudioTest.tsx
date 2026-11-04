@@ -181,7 +181,7 @@ export default function DualAudioTest({ email }: { email: string }) {
       // Must be called directly from the click gesture. Browser always asks the user what to share.
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: { displaySurface: "browser" },
-        audio: true,
+        audio: { suppressLocalAudioPlayback: false },
         selfBrowserSurface: "exclude",
         systemAudio: "exclude",
       } as DisplayMediaStreamOptions);
