@@ -2,12 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { loadAzureSdk, type ContinuousListener, type SpeechCredential } from "./azure-client";
+import { type SpeechCredential } from "./azure-client";
+import { startStreamRecognition, type StreamRecognition } from "./azure-stream-client";
 
 type Source = "candidate" | "interviewer";
 type Locale = "en-US" | "en-GB" | "vi-VN";
 type TranscriptLine = { id: number; text: string; time: string };
-type ChannelState = { connected: boolean; listening: boolean; level: number; partial: string; lines: TranscriptLine[]; error: string };
+type ChannelState = { connected: boolean; listening: boolean; level: number; partial: string; lines: TranscriptLine[]; error: string; pcmFrames: number; azureStatus: string };
 type Capture = { stream: MediaStream; stopMeter: () => void };
 type DiagnosticStatus = { enabled: boolean; azure: { configured: boolean; region: string | null } };
 
@@ -17,7 +18,7 @@ const options: { value: Locale; label: string }[] = [
   { value: "vi-VN", label: "Tiếng Việt" },
 ];
 const initialChannel = (): ChannelState => ({
-  connected: false, listening: false, level: 0, partial: "", lines: [], error: "",
+  connected: false, listening: false, level: 0, partial: "", lines: [], error: "", pcmFrames: 0, azureStatus: "Not started",
 });
 const now = () => new Date().toLocaleTimeString();
 
@@ -78,7 +79,7 @@ export default function DualAudioTest({ email }: { email: string }) {
   const [globalError, setGlobalError] = useState("");
   const [busy, setBusy] = useState(false);
   const captures = useRef<Record<Source, Capture | null>>({ candidate: null, interviewer: null });
-  const recognizers = useRef<Record<Source, ContinuousListener | null>>({ candidate: null, interviewer: null });
+  const recognizers = useRef<Record<Source, StreamRecognition | null>>({ candidate: null, interviewer: null });
   const tokenCache = useRef<{ value: SpeechCredential; expiry: number } | null>(null);
   const runVersion = useRef(0);
   const lineId = useRef(0);
@@ -121,7 +122,7 @@ export default function DualAudioTest({ email }: { email: string }) {
   async function stopAzure(source: Source) {
     const recognizer = recognizers.current[source];
     recognizers.current[source] = null;
-    patch(source, { listening: false, partial: "" });
+    patch(source, { listening: false, partial: "", azureStatus: "Stopped" });
     if (recognizer) {
       try { await recognizer.stop(); }
       catch (error) { patch(source, { error: "Could not stop Azure: " + String(error) }); }
@@ -137,7 +138,7 @@ export default function DualAudioTest({ email }: { email: string }) {
       current.stopMeter();
       current.stream.getTracks().forEach(track => track.stop());
     }
-    patch(source, { connected: false, listening: false, level: 0, partial: "" });
+    patch(source, { connected: false, listening: false, level: 0, partial: "", pcmFrames: 0, azureStatus: "Not started" });
   }
 
   function registerCapture(source: Source, stream: MediaStream) {
@@ -155,7 +156,7 @@ export default function DualAudioTest({ email }: { email: string }) {
     if (source === "interviewer") {
       stream.getVideoTracks()[0]?.addEventListener("ended", ended, { once: true });
     }
-    patch(source, { connected: true, error: "", level: 0, lines: [], partial: "" });
+    patch(source, { connected: true, error: "", level: 0, lines: [], partial: "", pcmFrames: 0, azureStatus: "Capture connected; Azure STT not started" });
   }
 
   async function connectMicrophone() {
@@ -219,16 +220,15 @@ export default function DualAudioTest({ email }: { email: string }) {
     setGlobalError("");
     const version = ++runVersion.current;
     try {
-      await loadAzureSdk();
       const credential = await getCredential();
       for (const source of sources) {
         const capture = captures.current[source];
         if (!capture || unmounted.current || version !== runVersion.current) break;
         if (recognizers.current[source]) continue;
         try {
-          const listener = await startInputStreamRecognition(capture.stream, locale[source], credential, {
-            partial: text => patch(source, { partial: text }),
-            final: text => {
+          const listener = await startStreamRecognition(capture.stream, locale[source], credential, {
+            onPartial: text => patch(source, { partial: text }),
+            onFinal: text => {
               if (unmounted.current) return;
               setChannels(current => ({
                 ...current,
@@ -239,15 +239,19 @@ export default function DualAudioTest({ email }: { email: string }) {
                 },
               }));
             },
-            error: message => patch(source, { error: message, listening: false }),
+            onStatus: message => patch(source, { azureStatus: message }),
+            onAudioFrames: frames => patch(source, { pcmFrames: frames }),
+            onError: message => {
+              patch(source, { error: message, listening: false, azureStatus: "Azure error" });
+            },
           });
           if (unmounted.current || version !== runVersion.current || captures.current[source] !== capture) {
             await listener.stop();
             continue;
           }
           recognizers.current[source] = listener;
-          patch(source, { listening: true, error: "" });
-        } catch (error) { patch(source, { listening: false, error: "Azure STT: " + String(error) }); }
+          patch(source, { listening: true, error: "", azureStatus: "Azure STT listening" });
+        } catch (error) { patch(source, { listening: false, error: "Azure STT: " + String(error), azureStatus: "Failed to start" }); }
       }
     } catch (error) {
       if (version === runVersion.current && !unmounted.current) setGlobalError(String(error));
@@ -270,6 +274,7 @@ export default function DualAudioTest({ email }: { email: string }) {
       <p className="muted small">{description}</p>
       <p><strong>Capture:</strong> {channel.connected ? "Connected" : "Not connected"} ·
         <strong> Azure:</strong> {channel.listening ? " Listening" : " Stopped"}</p>
+      <p className="muted small">Azure status: <strong>{channel.azureStatus}</strong> · PCM frames sent: <strong>{channel.pcmFrames}</strong></p>
       <div className="device-row">
         {!channel.connected ?
           <button className="btn primary" disabled={busy} onClick={() => {
@@ -288,6 +293,7 @@ export default function DualAudioTest({ email }: { email: string }) {
           {options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
       </label>
+      {channel.connected && !channel.listening && <p className="muted small">Source connected. Press <strong>Start Azure STT</strong> below to transcribe audio.</p>}
       {channel.error && <p role="alert" className="alert error">{channel.error}</p>}
       <div className="soft-notice" style={{ minHeight: 170, maxHeight: 290, overflowY: "auto" }}>
         <strong>Azure transcript · {title}</strong>
@@ -322,7 +328,8 @@ export default function DualAudioTest({ email }: { email: string }) {
           <h2>How to test</h2>
           <p>1. Open Meet / Zoom Web / Teams Web in another Chrome tab and use headphones.</p>
           <p>2. Connect your microphone, then share the actual meeting <strong>Chrome Tab</strong> with <strong>Share tab audio</strong> enabled.</p>
-          <p>3. Confirm both volume meters move independently. Start Azure STT to see live transcripts.</p>
+          <p>3. Confirm both volume meters move independently. Click <strong>Start Azure STT</strong>; connecting a source alone does not start transcription.</p>
+          <p>4. Need an audio source? <Link href="/settings/audio-samples" target="_blank" rel="noopener noreferrer">Open the sample audio player in a new tab</Link>. Share <strong>that tab</strong> with audio enabled.</p>
           <p className="muted small">Chrome requires video permission for tab capture, but this page ignores the video track. Only tab audio is used. Remote tab audio does not identify individual reviewers.</p>
           <p className="muted small">Provider tests: <strong>{diagnostics ? (diagnostics.enabled ? "Enabled" : "Disabled") : "Checking…"}</strong> ·
             Azure: <strong>{diagnostics?.azure.configured ? "Configured" : "Not configured"}</strong>
@@ -338,7 +345,8 @@ export default function DualAudioTest({ email }: { email: string }) {
         </div>
         <section className="panel">
           <h2>Azure Speech-to-Text</h2>
-          <p className="muted small">Run recognizers for any connected sources. Final transcripts are kept only in page memory. Azure charges can apply.</p>
+          <p><strong>For realtime transcripts, you must press Start Azure STT after connecting audio.</strong> When recognition is running, PCM frames should rise and speech should appear in its matching column.</p>
+          <p className="muted small">Run recognizers for any connected sources. If the volume meter moves but PCM frames stay at zero, the browser audio pipeline is blocked. If PCM increases but there is no text, check the language and Azure status. Azure charges can apply.</p>
           <div className="device-row">
             <button className="btn primary" disabled={busy || !diagnostics?.enabled || !diagnostics.azure.configured ||
               (!channels.candidate.connected && !channels.interviewer.connected) ||
@@ -359,60 +367,3 @@ export default function DualAudioTest({ email }: { email: string }) {
   </div>;
 }
 
-/** A separate Azure recognizer per stream: never mix candidate and remote tab audio. */
-async function startInputStreamRecognition(stream: MediaStream, locale: Locale, credential: SpeechCredential,
-  callbacks: { partial: (text: string) => void; final: (text: string) => void; error: (message: string) => void }
-): Promise<ContinuousListener> {
-  const sdk = await loadAzureSdk();
-  const originalTrack = stream.getAudioTracks()[0];
-  if (!originalTrack || originalTrack.readyState !== "live") throw new Error("Audio source is no longer active");
-  const audioTrack = originalTrack.clone();
-  const input = sdk.AudioConfig.fromStreamInput(new MediaStream([audioTrack]));
-  const config = sdk.SpeechConfig.fromAuthorizationToken(credential.token, credential.region);
-  config.speechRecognitionLanguage = locale;
-  const recognizer = new sdk.SpeechRecognizer(config, input);
-  let stopped = false;
-  let accumulated = "";
-  recognizer.recognizing = (_: unknown, event: { result?: { text?: string } }) =>
-    callbacks.partial(event.result?.text || "");
-  recognizer.recognized = (_: unknown, event: { result?: { reason: number; text?: string } }) => {
-    const result = event.result;
-    if (result && result.reason === sdk.ResultReason.RecognizedSpeech && typeof result.text === "string" && result.text.trim()) {
-      const text = result.text.trim();
-      accumulated += (accumulated ? " " : "") + text;
-      callbacks.final(text);
-    }
-  };
-  recognizer.canceled = (_: unknown, event: { reason: number; errorDetails?: string }) => {
-    if (!stopped && event.reason === sdk.CancellationReason.Error) {
-      callbacks.error(event.errorDetails || "Azure recognition canceled");
-    }
-  };
-  try {
-    await new Promise<void>((resolve, reject) => {
-      recognizer.startContinuousRecognitionAsync(resolve,
-        (error: string) => reject(new Error(String(error))));
-    });
-  } catch (error) {
-    recognizer.close();
-    input.close();
-    audioTrack.stop();
-    throw error;
-  }
-  return {
-    stop: async () => {
-      if (stopped) return accumulated;
-      stopped = true;
-      try {
-        await new Promise<void>((resolve, reject) =>
-          recognizer.stopContinuousRecognitionAsync(resolve,
-            (error: string) => reject(new Error(String(error)))));
-      } finally {
-        recognizer.close();
-        input.close();
-        audioTrack.stop();
-      }
-      return accumulated;
-    },
-  };
-}
