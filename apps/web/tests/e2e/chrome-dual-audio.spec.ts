@@ -24,7 +24,7 @@ test("dual-audio diagnostic displays independent microphone and meeting-tab cont
   await expect(page.getByRole("button", { name: "Share meeting tab audio" })).toBeVisible();
   await expect(page.getByLabel("Candidate · Microphone input level")).toHaveAttribute("value", "0");
   await expect(page.getByLabel("Interviewer · Chrome Tab input level")).toHaveAttribute("value", "0");
-  await expect(page.getByRole("button", { name: "Start Azure STT" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Start Azure STT", exact: true })).toBeDisabled();
   await expect(page.getByText("PCM frames sent:")).toHaveCount(2);
   await expect(page.getByRole("link", { name: /Open the sample audio player in a new tab/ })).toHaveAttribute("href", "/settings/audio-samples");
   await expect(page.getByText("No speech recognized yet.")).toHaveCount(2);
