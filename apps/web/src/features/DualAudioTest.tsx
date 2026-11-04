@@ -91,6 +91,9 @@ export default function DualAudioTest({ email }: { email: string }) {
 
   useEffect(() => {
     unmounted.current = false;
+    const runningVersion = runVersion;
+    const recognitionRefs = recognizers;
+    const captureRefs = captures;
     fetch("/api/me/provider-tests", { cache: "no-store", credentials: "same-origin" })
       .then(async response => {
         const result = await response.json() as DiagnosticStatus & { error?: string };
@@ -100,13 +103,13 @@ export default function DualAudioTest({ email }: { email: string }) {
       .catch(error => { if (!unmounted.current) setGlobalError(String(error)); });
     return () => {
       unmounted.current = true;
-      runVersion.current++;
+      runningVersion.current++;
       for (const source of ["candidate", "interviewer"] as const) {
-        const listener = recognizers.current[source];
-        recognizers.current[source] = null;
+        const listener = recognitionRefs.current[source];
+        recognitionRefs.current[source] = null;
         if (listener) void listener.stop().catch(() => {});
-        const capture = captures.current[source];
-        captures.current[source] = null;
+        const capture = captureRefs.current[source];
+        captureRefs.current[source] = null;
         if (capture) {
           capture.stopMeter();
           capture.stream.getTracks().forEach(track => track.stop());
@@ -348,7 +351,7 @@ export default function DualAudioTest({ email }: { email: string }) {
               interviewer: { ...current.interviewer, lines: [], partial: "" },
             }))}>Clear transcripts</button>
           </div>
-          <p className="muted small">After the test, disconnect both audio sources or stop sharing using Chrome's sharing indicator. No audio recording or AI hints are created.</p>
+          <p className="muted small">After the test, disconnect both audio sources or stop sharing using Chrome&apos;s sharing indicator. No audio recording or AI hints are created.</p>
           <p className="muted small">Speaker identity is inferred by audio source, not voice biometrics. Use with participant consent and follow interview policies.</p>
         </section>
       </main>
