@@ -74,7 +74,7 @@ export async function startStreamRecognition(
     };
     speech.recognized = (_: unknown, event: { result?: { text?: string; reason?: number } }) => {
       const result = event.result;
-      if (result?.reason === sdk.ResultReason.RecognizedSpeech && result.text?.trim()) {
+      if (result && result.reason === sdk.ResultReason.RecognizedSpeech && typeof result.text === "string" && result.text.trim()) {
         callbacks.onFinal(result.text.trim());
       } else if (result?.reason === sdk.ResultReason.NoMatch) {
         callbacks.onStatus("Azure received audio but could not recognize words (NoMatch)");
