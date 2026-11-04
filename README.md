@@ -74,6 +74,10 @@ The server-side `OPENAI_API_KEY`, `AI_MODEL` and optional `LLM_BASE_URL` path re
 CLI auth with real accounts and Azure voice remain external smoke-test requirements.
 
 
+## Test Chrome microphone and interview tab audio
+
+Open **/settings/audio-test** to test separate microphone and Chrome meeting-tab audio streams, levels, explicit PCM streaming diagnostics, and Azure STT transcripts. Open **/settings/audio-samples** in a second Chrome tab to play fixed Azure TTS interview questions for repeatable tab-capture tests. This diagnostic works with Google Meet / Zoom Web / Teams Web on Chrome (choose **Chrome Tab** and **Share tab audio**). It does not record or store audio/transcripts. Azure speech recognition uses the existing opt-in `ENABLE_PROVIDER_TESTS=true` diagnostics flag and server-side Azure Speech credentials. See [Chrome dual-audio test](docs/chrome-dual-audio-test.md).
+
 ## Test Codex, Agy and Azure without an interview
 
 Sign in and open **/settings/test** from Settings. To enable paid smoke tests on a trusted host set `ENABLE_PROVIDER_TESTS=true` (and `ENABLE_LOCAL_AI_CLI=true` for local CLI) and restart. The page separately checks Codex CLI, Agy CLI, Azure token exchange, real Azure TTS voice preview, browser microphone/speaker and Azure STT. It does not save transcripts or credentials. These checks require real provider authentication and are **not** asserted by CI. **Disable the test flag after finishing** if exposing the server to untrusted accounts. See [provider diagnostics](docs/provider-diagnostics.md).

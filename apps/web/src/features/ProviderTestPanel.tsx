@@ -136,6 +136,7 @@ export default function ProviderTestPanel({ email }: { email: string }) {
       <nav aria-label="Workspace navigation">
         <Link className="live-entry" href="/settings">← AI settings</Link>
         <Link className="live-entry" href="/live">✦ AI Interview</Link>
+        <Link className="live-entry" href="/settings/audio-test">🎙 Dual audio capture test</Link>
         <Link className="live-entry" href="/">Offline demo</Link>
       </nav>
       <div className="sidebar-bottom">Real CLI and Azure tests may incur provider charges. Use only on a trusted self-hosted server.</div>
