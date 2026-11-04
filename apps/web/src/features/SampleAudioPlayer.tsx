@@ -18,6 +18,7 @@ export default function SampleAudioPlayer({ email }: { email: string }) {
 
   useEffect(() => {
     mounted.current = true;
+    const playback = audioRef.current;
     fetch("/api/me/provider-tests", { credentials: "same-origin", cache: "no-store" })
       .then(async response => {
         const data = await response.json() as DiagnosticStatus & { error?: string };
@@ -26,7 +27,7 @@ export default function SampleAudioPlayer({ email }: { email: string }) {
       }).catch(err => { if (mounted.current) setError(String(err)); });
     return () => {
       mounted.current = false;
-      audioRef.current?.pause();
+      playback?.pause();
       if (urlRef.current) URL.revokeObjectURL(urlRef.current);
       urlRef.current = null;
     };
@@ -96,7 +97,7 @@ export default function SampleAudioPlayer({ email }: { email: string }) {
           <p>2. On that page, click <strong>Share meeting tab audio</strong>, choose <strong>this Sample audio player tab</strong> in Chrome Tab, and enable <strong>Share tab audio</strong>.</p>
           <p>3. On the capture page click <strong>Start Azure STT</strong>, and set interviewer recognition language to match the sample.</p>
           <p>4. Return here and press Play below. Verify the <strong>Interviewer · Chrome Tab</strong> meter and its live transcript change in the capture page.</p>
-          <p className="muted small">Azure TTS sample output is played by an HTML audio element in this tab, not by the operating system's speechSynthesis. This makes it appropriate for Chrome tab audio capture.</p>
+          <p className="muted small">Azure TTS sample output is played by an HTML audio element in this tab, not by the operating system&apos;s speechSynthesis. This makes it appropriate for Chrome tab audio capture.</p>
           {status && (!status.enabled || !status.azure.configured) && <p className="alert info">
             Configure AZURE_SPEECH_KEY, AZURE_SPEECH_REGION and ENABLE_PROVIDER_TESTS=true on the local web server, then restart it to enable playback.
           </p>}
