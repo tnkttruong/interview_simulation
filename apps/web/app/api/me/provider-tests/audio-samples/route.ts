@@ -3,7 +3,6 @@ import { z } from "zod";
 import { DomainError, voiceByLocale } from "@interview/core";
 import { AUDIO_SAMPLES } from "@/shared/audio-samples";
 import { currentUser, safeError, tracedApi, unauthorized } from "@/server/request";
-import { providerTestsEnabled } from "@/server/provider-tests";
 import { createThrottle } from "@/server/guards";
 
 export const runtime = "nodejs";
@@ -12,13 +11,12 @@ const sampleId = z.object({ id: z.enum(AUDIO_SAMPLES.map(sample => sample.id) as
 ]) }).strict();
 const throttle = createThrottle(3000);
 
-/** Fixed Azure TTS samples: authenticated, opt-in, bounded, and no user-provided SSML. */
+/** Fixed Azure TTS samples: authenticated and throttled, with no user-provided SSML. */
 export async function POST(request: Request) {
   return tracedApi(request, "provider_tests.audio_sample", async () => {
     const user = await currentUser(request);
     if (!user) return unauthorized();
     try {
-      if (!providerTestsEnabled()) throw new DomainError("invalid", "Enable provider diagnostics to generate sample audio.");
       const { id } = sampleId.parse(await request.json());
       const sample = AUDIO_SAMPLES.find(item => item.id === id)!;
       const region = process.env.AZURE_SPEECH_REGION;
