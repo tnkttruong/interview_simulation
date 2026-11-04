@@ -76,7 +76,7 @@ CLI auth with real accounts and Azure voice remain external smoke-test requireme
 
 ## Test Chrome microphone and interview tab audio
 
-Open **/settings/audio-test** to test separate microphone and Chrome meeting-tab audio streams, levels, and Azure STT transcripts. This diagnostic works with Google Meet / Zoom Web / Teams Web on Chrome (choose **Chrome Tab** and **Share tab audio**). It does not record or store audio/transcripts. Azure speech recognition uses the existing opt-in `ENABLE_PROVIDER_TESTS=true` diagnostics flag and server-side Azure Speech credentials. See [Chrome dual-audio test](docs/chrome-dual-audio-test.md).
+Open **/settings/audio-test** to test separate microphone and Chrome meeting-tab audio streams, levels, explicit PCM streaming diagnostics, and Azure STT transcripts. Open **/settings/audio-samples** in a second Chrome tab to play fixed Azure TTS interview questions for repeatable tab-capture tests. This diagnostic works with Google Meet / Zoom Web / Teams Web on Chrome (choose **Chrome Tab** and **Share tab audio**). It does not record or store audio/transcripts. Azure speech recognition uses the existing opt-in `ENABLE_PROVIDER_TESTS=true` diagnostics flag and server-side Azure Speech credentials. See [Chrome dual-audio test](docs/chrome-dual-audio-test.md).
 
 ## Test Codex, Agy and Azure without an interview
 
