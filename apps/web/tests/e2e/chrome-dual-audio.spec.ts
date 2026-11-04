@@ -49,8 +49,55 @@ test("sample audio page shows fixed interview clips without starting paid Azure 
   await page.goto("/settings/audio-samples");
   await expect(page.getByRole("heading", { name: "Sample audio player" })).toBeVisible();
   await expect(page.getByRole("button", { name: /▶ Play/ })).toHaveCount(6);
+  await expect(page.getByRole("button", { name: /▶ Play/ }).first()).toBeEnabled();
   await expect(page.getByText("Goroutines and channels")).toBeVisible();
   const response = await page.request.post("/api/me/provider-tests/audio-samples", { data: { id: "golang-en" } });
   expect(response.status()).toBe(400);
   expect((await response.json()).error).toMatch(/configure azure/i);
+});
+
+test("Play generates Azure audio once per sample per page, and reload clears in-memory cache", async ({ page }) => {
+  await page.goto("/signin");
+  await page.getByRole("button", { name: /New here/ }).click();
+  await page.getByLabel("Name").fill("Audio Cache User");
+  await page.getByLabel("Email").fill("audio-cache-" + Date.now() + "@example.test");
+  await page.getByLabel("Password").fill("correct-horse-battery-staple!");
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByTestId("live-workspace")).toHaveAttribute("data-hydrated", "true");
+
+  let calls = 0;
+  const wave = Buffer.alloc(44 + 16000);
+  wave.write("RIFF", 0);
+  wave.writeUInt32LE(wave.length - 8, 4);
+  wave.write("WAVEfmt ", 8);
+  wave.writeUInt32LE(16, 16);
+  wave.writeUInt16LE(1, 20);
+  wave.writeUInt16LE(1, 22);
+  wave.writeUInt32LE(16000, 24);
+  wave.writeUInt32LE(32000, 28);
+  wave.writeUInt16LE(2, 32);
+  wave.writeUInt16LE(16, 34);
+  wave.write("data", 36);
+  wave.writeUInt32LE(wave.length - 44, 40);
+  await page.route("**/api/me/provider-tests/audio-samples", async route => {
+    calls++;
+    await route.fulfill({ status: 200, contentType: "audio/wav", body: wave });
+  });
+  await page.goto("/settings/audio-samples");
+  await page.getByRole("button", { name: "▶ Play" }).first().click();
+  await expect(page.getByRole("button", { name: "↻ Replay (cached)" })).toHaveCount(1);
+  expect(calls).toBe(1);
+
+  await page.getByRole("button", { name: "↻ Replay (cached)" }).click();
+  expect(calls).toBe(1);
+
+  await page.getByRole("button", { name: "▶ Play" }).first().click();
+  await expect(page.getByRole("button", { name: "↻ Replay (cached)" })).toHaveCount(2);
+  expect(calls).toBe(2);
+
+  await page.reload();
+  await expect(page.getByRole("button", { name: "↻ Replay (cached)" })).toHaveCount(0);
+  await page.getByRole("button", { name: "▶ Play" }).first().click();
+  await expect(page.getByRole("button", { name: "↻ Replay (cached)" })).toHaveCount(1);
+  expect(calls).toBe(3);
 });
