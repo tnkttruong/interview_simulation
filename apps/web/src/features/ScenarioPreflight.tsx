@@ -46,6 +46,7 @@ export default function ScenarioPreflight({
   const scriptLocaleRef=useRef<Locale|null>(null);
   const [candidateLocale, setCandidateLocale] = useState<Locale>("vi-VN");
   const [voice, setVoice] = useState<string>(voiceByLocale["en-US"][0]);
+  const [speed, setSpeed] = useState<number>(1.0);
   const [consent, setConsent] = useState(false);
 
   const [micOk, setMicOk] = useState(false);
@@ -143,6 +144,7 @@ export default function ScenarioPreflight({
           : "Hello! This is a preview of the interviewer voice.";
       const utterance = new SpeechSynthesisUtterance(phrase);
       utterance.lang = interviewerLocale;
+      utterance.rate = speed;
       const voices = window.speechSynthesis.getVoices();
       const match = voices.find((v) => v.lang.startsWith(interviewerLocale.split("-")[0]));
       if (match) utterance.voice = match;
@@ -206,6 +208,7 @@ export default function ScenarioPreflight({
           speech: {
             interviewerLocale,
             interviewerVoiceId: voice,
+            interviewerSpeed: speed,
             candidateSttLocale: candidateLocale,
             consentToTranscript: consent,
           },
@@ -320,6 +323,18 @@ export default function ScenarioPreflight({
                       {voiceByLocale[interviewerLocale].map((v) => (
                         <option key={v} value={v}>{v}</option>
                       ))}
+                    </select>
+                  </label>
+
+                  <label>
+                    AI interviewer speed
+                    <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))}>
+                      <option value={0.75}>0.75x (Chậm / Slower)</option>
+                      <option value={0.85}>0.85x</option>
+                      <option value={1.0}>1.0x (Chuẩn / Normal)</option>
+                      <option value={1.15}>1.15x</option>
+                      <option value={1.25}>1.25x (Nhanh hơn / Faster)</option>
+                      <option value={1.5}>1.5x (Nhanh / Fast)</option>
                     </select>
                   </label>
 

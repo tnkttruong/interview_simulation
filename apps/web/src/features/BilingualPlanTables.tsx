@@ -26,18 +26,18 @@ function PlanTable({title,description,overview,stages,rubric,isVietnamese,testId
   <h3>{title}</h3><p className="muted small">{description}</p>
   <p className="bilingual-script-overview">{overview}</p>
   <div className="bilingual-script-scroll"><table className="bilingual-script-table">
-   <thead><tr><th scope="col">#</th><th scope="col">{isVietnamese?"Câu hỏi và mục tiêu":"Question and goal"}</th>
-    <th scope="col">{isVietnamese?"Câu trả lời":"Answer"}</th></tr></thead>
+   <thead><tr><th scope="col" style={{width:"36px",textAlign:"center"}}>#</th><th scope="col">{isVietnamese?"Câu hỏi và mục tiêu":"Question and goal"}</th></tr></thead>
    <tbody>{stages.map((stage,i)=><Fragment key={i}>
-    <tr className="bilingual-script-stage"><th colSpan={3} scope="rowgroup">{i+1}. {stage.topic}</th></tr>
-    {stage.items.map((item,j)=><tr key={j}><th scope="row">{j+1}</th>
+    <tr className="bilingual-script-stage"><th colSpan={2} scope="rowgroup">{i+1}. {stage.topic}</th></tr>
+    {stage.items.map((item,j)=><tr key={j}><th scope="row" style={{textAlign:"center"}}>{j+1}</th>
      <td><div className="bilingual-script-type">{item.type==="interactive"?(isVietnamese?"Tình huống tương tác":"Interactive scenario"):(isVietnamese?"Câu hỏi độc lập":"Standalone")}</div>
       <strong>{item.prompt}</strong>
       {item.goal&&<p className="muted small">{isVietnamese?"Mục tiêu":"Goal"}: {item.goal}</p>}
       {item.type==="interactive"&&<p className="muted small">{isVietnamese?"Hỏi tiếp tối đa":"Max follow-ups"}: {item.maxFollowUps}. {isVietnamese?"Kết thúc khi":"Complete when"}: {item.completionCriteria}</p>}
-     </td><td>{item.suggestedAnswer&&<details><summary>{isVietnamese?"Câu trả lời gợi ý":"Suggested answer"}</summary><p>{item.suggestedAnswer}</p></details>}
+      {item.suggestedAnswer&&<details><summary>{isVietnamese?"Câu trả lời gợi ý":"Suggested answer"}</summary><p>{item.suggestedAnswer}</p></details>}
       {item.fullAnswer&&<details data-testid="full-answer"><summary>{isVietnamese?"Câu trả lời chính xác":"Complete answer"}</summary>
-       <p>{item.fullAnswer}</p></details>}</td>
+       <p>{item.fullAnswer}</p></details>}
+     </td>
     </tr>)}
    </Fragment>)}</tbody>
   </table></div>

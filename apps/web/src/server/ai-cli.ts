@@ -148,7 +148,7 @@ export async function runCli(provider:CliProvider,model:string,prompt:string):Pr
  try {
   const cmd=commandFor[provider];
   const args=provider==="codex_cli"
-   ? ["exec","--json","--sandbox","read-only","--skip-git-repo-check","--model",model,"-"]
+   ? ["exec","--json","--sandbox","read-only","--skip-git-repo-check","-c","model_reasoning_effort=\"low\"","--model",model,"-"]
    : ["--input-format","stream-json","--output-format","stream-json","--sandbox","--model",model];
   return await new Promise<string>((resolve,reject)=>{
    const child=spawn(cmd,args,{cwd:dir,env:restrictedEnv(),shell:false,stdio:["pipe","pipe","pipe"],windowsHide:true});

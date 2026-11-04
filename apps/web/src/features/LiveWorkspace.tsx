@@ -63,6 +63,7 @@ export default function LiveWorkspace({email}:{email:string}){
  const [editFocus,setEditFocus]=useState(""),[editCvText,setEditCvText]=useState("");
  const [interviewerLocale,setInterviewerLocale]=useState<Locale>("en-US");
  const [voice,setVoice]=useState<string>(voiceByLocale["en-US"][0]),[catalog,setCatalog]=useState<Catalog|null>(null);
+ const [speed,setSpeed]=useState<number>(1.0);
  const [consent,setConsent]=useState(false),[textOnly,setTextOnly]=useState(false),[micOk,setMicOk]=useState(false);
  const [speakerOk,setSpeakerOk]=useState(false),[session,setSession]=useState<Session|null>(null);
  const [isRecording,setIsRecording]=useState(false);
@@ -138,6 +139,7 @@ export default function LiveWorkspace({email}:{email:string}){
    if(config.interviewerLocale)setInterviewerLocale(config.interviewerLocale);
    if(config.candidateSttLocale)setCandidateLocale(config.candidateSttLocale);
    if(config.interviewerVoiceId)setVoice(config.interviewerVoiceId);
+   if(config.interviewerSpeed)setSpeed(config.interviewerSpeed);
   }catch{}
   if(next.scenarioId&&scenarioRef.current?.id!==next.scenarioId){
    try{await loadPlan(next.scenarioId);}catch(e){console.error("Failed to load scenario plan:", e);}
@@ -316,7 +318,7 @@ export default function LiveWorkspace({email}:{email:string}){
   await run(async()=>{
    const response=await fetch("/api/live/speech/preview",{
     method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({interviewerLocale,voiceId:voice})
+    body:JSON.stringify({interviewerLocale,voiceId:voice,speed})
    });
    if(!response.ok)throw new Error("Could not preview voice; verify Azure Speech configuration");
    const source=URL.createObjectURL(await response.blob());
@@ -339,7 +341,7 @@ export default function LiveWorkspace({email}:{email:string}){
    if(!startKey.current)startKey.current=crypto.randomUUID();
    const s=await api<Session>("/api/live/sessions",{method:"POST",body:JSON.stringify({
     scenarioId:scenario.id,revision:scenario.latestRevision,requestKey:startKey.current,
-    speech:{interviewerLocale,interviewerVoiceId:voice,candidateSttLocale:candidateLocale,consentToTranscript:true}
+    speech:{interviewerLocale,interviewerVoiceId:voice,interviewerSpeed:speed,candidateSttLocale:candidateLocale,consentToTranscript:true}
    })});
    setSession(s);sessionRef.current=s;changeStep("meeting",false,scenario.id,s.id);startKey.current=null;credential.current=null;
    const q=await readQuestion(s);
@@ -389,6 +391,7 @@ export default function LiveWorkspace({email}:{email:string}){
    const config=JSON.parse(selected.speechConfig);
    setInterviewerLocale(config.interviewerLocale);setCandidateLocale(config.candidateSttLocale);
    setVoice(config.interviewerVoiceId);
+   if(config.interviewerSpeed)setSpeed(config.interviewerSpeed);
    changeStep(selected.state==="COMPLETED"?"results":"meeting",false,selected.scenarioId,selected.id);
   });
  }
@@ -444,7 +447,8 @@ export default function LiveWorkspace({email}:{email:string}){
   try{
    const config=JSON.parse(current.speechConfig);
    const cred=await getCredential();
-   await say(current.nextQuestion,config.interviewerVoiceId,cred);
+   const effectiveSpeed=config.interviewerSpeed??speed??1.0;
+   await say(current.nextQuestion,config.interviewerVoiceId,cred,effectiveSpeed);
    setMessage("Interviewer finished speaking. Bạn có thể trả lời bây giờ.");
    if(autoListenAfter && current.state==="IN_PROGRESS" && current.nextQuestionId){
     void startListening();
@@ -686,6 +690,16 @@ export default function LiveWorkspace({email}:{email:string}){
       {plan?.bilingual&&<p className="muted small">Script language: {plan.bilingual.interviewerLocale}. Change Default interviewer language in Settings and generate a new revision to switch languages.</p>}
       <label>AI interviewer voice<select value={voice} onChange={e=>setVoice(e.target.value)}>
        {visibleVoices.map(v=><option key={v} value={v}>{v}</option>)}</select></label>
+      <label>AI interviewer speed (Azure TTS)
+       <select aria-label="AI interviewer speed" value={speed} onChange={e=>setSpeed(Number(e.target.value))}>
+        <option value={0.75}>0.75x (Chậm / Slower)</option>
+        <option value={0.85}>0.85x</option>
+        <option value={1.0}>1.0x (Chuẩn / Normal)</option>
+        <option value={1.15}>1.15x</option>
+        <option value={1.25}>1.25x (Nhanh hơn / Faster)</option>
+        <option value={1.5}>1.5x (Nhanh / Fast)</option>
+       </select>
+      </label>
       <button className="btn secondary" type="button" disabled={busy||!catalog?.enabled||!visibleVoices.includes(voice)}
         onClick={previewSelectedVoice}>▶ Preview interviewer voice (Azure)</button>
       <label>Your spoken input language<select value={candidateLocale} onChange={e=>setCandidateLocale(e.target.value as Locale)}>
@@ -718,6 +732,17 @@ export default function LiveWorkspace({email}:{email:string}){
        <button className="btn secondary" disabled={busy||!session||session.state!=="IN_PROGRESS"||!!session.nextQuestion}
         onClick={()=>session&&run(async()=>{await readQuestion(session);})}>Generate question</button>
        <button className="btn secondary" disabled={busy||textOnly||!session?.nextQuestion||session?.state!=="IN_PROGRESS"} onClick={()=>speak(undefined,false)}>▶ Speak question</button>
+       <label style={{display:"inline-flex",alignItems:"center",gap:"6px",margin:0,fontSize:"14px"}} title="Azure TTS speed">
+        Speed:
+        <select value={speed} onChange={e=>setSpeed(Number(e.target.value))} style={{width:"auto",padding:"4px 8px"}}>
+         <option value={0.75}>0.75x</option>
+         <option value={0.85}>0.85x</option>
+         <option value={1.0}>1.0x</option>
+         <option value={1.15}>1.15x</option>
+         <option value={1.25}>1.25x</option>
+         <option value={1.5}>1.5x</option>
+        </select>
+       </label>
        {isRecording ? (
         <>
          <button className="btn primary" style={{background:"#dc2626",borderColor:"#b91c1c",color:"#fff",fontWeight:600}} disabled={busy} onClick={()=>stopListening(true)}>

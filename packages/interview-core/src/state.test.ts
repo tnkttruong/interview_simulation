@@ -17,6 +17,18 @@ describe("interview state machine", () => {
       interviewerLocale: "en-US", interviewerVoiceId: "en-US-JennyNeural",
       candidateSttLocale: "vi-VN", consentToTranscript: true,
     }).candidateSttLocale).toBe("vi-VN");
+    expect(validateSpeechConfig({
+      interviewerLocale: "en-US", interviewerVoiceId: "en-US-JennyNeural",
+      interviewerSpeed: 1.25, candidateSttLocale: "vi-VN", consentToTranscript: true,
+    }).interviewerSpeed).toBe(1.25);
+    expect(validateSpeechConfig({
+      interviewerLocale: "en-US", interviewerVoiceId: "en-US-JennyNeural",
+      candidateSttLocale: "vi-VN", consentToTranscript: true,
+    }).interviewerSpeed).toBe(1.0);
+    expect(() => validateSpeechConfig({
+      interviewerLocale: "en-US", interviewerVoiceId: "en-US-JennyNeural",
+      interviewerSpeed: 3.5, candidateSttLocale: "vi-VN", consentToTranscript: true,
+    })).toThrow();
     expect(() => validateSpeechConfig({
       interviewerLocale: "vi-VN", interviewerVoiceId: "en-US-JennyNeural",
       candidateSttLocale: "en-US", consentToTranscript: true,

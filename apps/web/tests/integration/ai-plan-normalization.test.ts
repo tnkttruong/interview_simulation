@@ -17,6 +17,29 @@ describe("AI plan parsing and normalization", () => {
     expect(cleaned).toBe("{\"role\":\"DevOps Lead\"}");
   });
 
+  it("repairs truncated JSON cut off mid-array", () => {
+    const truncated = '{"role":"Senior/Principal Software Engineer","level":"Senior","overview":"Rails interview","stages":[{"topic":"Backend","items":[{"type":"standalone","prompt"';
+    const cleaned = cleanJsonText(truncated);
+    expect(() => JSON.parse(cleaned)).not.toThrow();
+    const obj = JSON.parse(cleaned) as { role: string; stages: Array<{ items: unknown[] }> };
+    expect(obj.role).toBe("Senior/Principal Software Engineer");
+    expect(obj.stages.length).toBe(1);
+  });
+
+  it("repairs JSON with trailing commas and unescaped newlines", () => {
+    const invalid = '{"role": "Lead Engineer", "stages": [1, 2, ], \n"overview": "Multi\nLine"}';
+    const cleaned = cleanJsonText(invalid);
+    expect(() => JSON.parse(cleaned)).not.toThrow();
+  });
+
+  it("handles valid JSON followed by extra commentary containing braces", () => {
+    const withExtra = '{"role":"Middle Backend Developer (Ruby on Rails + Go)","level":"Middle","overview":"Rails + Go interview"} Note: use {id} and [params] for further details.';
+    const cleaned = cleanJsonText(withExtra);
+    expect(() => JSON.parse(cleaned)).not.toThrow();
+    const obj = JSON.parse(cleaned) as { role: string };
+    expect(obj.role).toBe("Middle Backend Developer (Ruby on Rails + Go)");
+  });
+
   it("normalizes incomplete AI output into valid planSchema", () => {
     const incomplete = {
       role: "Backend Architect",

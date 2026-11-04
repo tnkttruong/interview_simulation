@@ -78,7 +78,7 @@ export default function SessionDetail({
     void loadData();
   }, [loadData]);
 
-  let parsedSpeech: { interviewerLocale?: string; interviewerVoiceId?: string; candidateSttLocale?: string } = {};
+  let parsedSpeech: { interviewerLocale?: string; interviewerVoiceId?: string; interviewerSpeed?: number; candidateSttLocale?: string } = {};
   try {
     if (session?.speechConfig) parsedSpeech = JSON.parse(session.speechConfig);
   } catch {}
@@ -200,8 +200,10 @@ export default function SessionDetail({
                     <p style={{ margin: "4px 0", fontWeight: 600 }}>{parsedSpeech.interviewerLocale || "en-US"}</p>
                   </div>
                   <div>
-                    <span className="muted small">Interviewer Voice ID</span>
-                    <p style={{ margin: "4px 0", fontWeight: 600 }}>{parsedSpeech.interviewerVoiceId || "Standard"}</p>
+                    <span className="muted small">Interviewer Voice / Speed</span>
+                    <p style={{ margin: "4px 0", fontWeight: 600 }}>
+                      {parsedSpeech.interviewerVoiceId || "Standard"} {parsedSpeech.interviewerSpeed ? `(${parsedSpeech.interviewerSpeed}x)` : "(1.0x)"}
+                    </p>
                   </div>
                   <div>
                     <span className="muted small">Candidate Input (STT)</span>

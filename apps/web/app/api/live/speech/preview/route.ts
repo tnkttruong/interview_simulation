@@ -5,7 +5,11 @@ import {currentUser,safeError,tracedApi,unauthorized} from "@/server/request";
 import {DomainError} from "@interview/core";
 import {createThrottle} from "@/server/guards";
 export const runtime="nodejs";
-const input=z.object({interviewerLocale:z.enum(["en-US","en-GB","vi-VN"]),voiceId:z.string().max(80)});
+const input=z.object({
+ interviewerLocale:z.enum(["en-US","en-GB","vi-VN"]),
+ voiceId:z.string().max(80),
+ speed:z.number().min(0.5).max(2.0).optional()
+});
 const throttle=createThrottle(10000);
 export async function POST(req:Request){
  return tracedApi(req,"speech.preview",async()=>{
@@ -18,9 +22,15 @@ export async function POST(req:Request){
    if(!region||!key||!/^[a-z0-9-]{2,35}$/.test(region))
     throw new DomainError("invalid","Azure Speech unavailable");
    if(!throttle.tryAcquire(user.id))return NextResponse.json({error:"Please retry the preview later"},{status:429});
+   const speed=parsed.speed??1.0;
    const phrase=parsed.interviewerLocale==="vi-VN"?"Xin chào, chào mừng bạn đến buổi phỏng vấn."
      :"Hello, welcome to your interview practice.";
-   const ssml='<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="'+parsed.interviewerLocale+'"><voice name="'+parsed.voiceId+'">'+phrase+'</voice></speak>';
+   const rateText=speed!==1.0?(()=>{
+    const percent=Math.round((speed-1)*100);
+    return percent>=0?`+${percent}%`:`${percent}%`;
+   })():null;
+   const inner=rateText?`<prosody rate="${rateText}">${phrase}</prosody>`:phrase;
+   const ssml='<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="'+parsed.interviewerLocale+'"><voice name="'+parsed.voiceId+'">'+inner+'</voice></speak>';
    const response=await fetch("https://"+region+".tts.speech.microsoft.com/cognitiveservices/v1",{
     method:"POST",headers:{"Ocp-Apim-Subscription-Key":key,"Content-Type":"application/ssml+xml",
      "X-Microsoft-OutputFormat":"audio-16khz-32kbitrate-mono-mp3"},

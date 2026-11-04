@@ -1,0 +1,177 @@
+{
+  "review_date": "2026-10-30",
+  "method": "GitHub CLI: gh repo list, gh api repos/remitano/{repo}/tarball/{default_branch}; static source review",
+  "repositories": [
+    {
+      "defaultBranchRef": {
+        "name": "develop"
+      },
+      "name": "dax-fe",
+      "pushedAt": "2026-10-30T11:54:01Z",
+      "url": "https://github.com/remitano/dax-fe",
+      "snapshot_commit_prefix": "739711e97809f7574ca10490f8ecf34829a42c01"
+    },
+    {
+      "defaultBranchRef": {
+        "name": "main"
+      },
+      "name": "dax-be",
+      "pushedAt": "2026-10-30T11:37:06Z",
+      "url": "https://github.com/remitano/dax-be",
+      "snapshot_commit_prefix": "778975ac8466a3381d08c94f3296c81997b1b0c5"
+    },
+    {
+      "defaultBranchRef": {
+        "name": "master"
+      },
+      "name": "gitops-lpex",
+      "pushedAt": "2026-10-30T08:05:46Z",
+      "url": "https://github.com/remitano/gitops-lpex",
+      "snapshot_commit_prefix": "0325128bd3088421b713604fb1229198ea7ffefa"
+    },
+    {
+      "defaultBranchRef": {
+        "name": "vault_sim_2"
+      },
+      "name": "dax-be-sim",
+      "pushedAt": "2026-10-30T06:04:51Z",
+      "url": "https://github.com/remitano/dax-be-sim",
+      "snapshot_commit_prefix": "24b38c19b159fd4921049a0cb212506a480e73fa"
+    },
+    {
+      "defaultBranchRef": {
+        "name": "master"
+      },
+      "name": "lpex-reporting-service",
+      "pushedAt": "2026-10-30T06:04:46Z",
+      "url": "https://github.com/remitano/lpex-reporting-service",
+      "snapshot_commit_prefix": "1e3706a7852ce8bdf3104dadb5a1ea5902021f50"
+    },
+    {
+      "defaultBranchRef": {
+        "name": "develop"
+      },
+      "name": "dax-admin-sso",
+      "pushedAt": "2026-10-30T06:04:42Z",
+      "url": "https://github.com/remitano/dax-admin-sso",
+      "snapshot_commit_prefix": "51ef15172bd2abe7c39983024b933d23d0b4f19b"
+    },
+    {
+      "defaultBranchRef": {
+        "name": "develop"
+      },
+      "name": "dax-verify-portal",
+      "pushedAt": "2026-10-30T06:04:38Z",
+      "url": "https://github.com/remitano/dax-verify-portal",
+      "snapshot_commit_prefix": "92d363cf2a53dbbc50e190e0e78e92a4445f90a3"
+    },
+    {
+      "defaultBranchRef": {
+        "name": "develop"
+      },
+      "name": "dax-kyc-service",
+      "pushedAt": "2026-10-30T06:04:33Z",
+      "url": "https://github.com/remitano/dax-kyc-service",
+      "snapshot_commit_prefix": "fa474a8684b9ef152d8354081075b73ec3b7e0f5"
+    },
+    {
+      "defaultBranchRef": {
+        "name": "master"
+      },
+      "name": "dax-fiat-service",
+      "pushedAt": "2026-10-30T06:04:28Z",
+      "url": "https://github.com/remitano/dax-fiat-service",
+      "snapshot_commit_prefix": "55836c614679ac6f8b16d7a6c05d5914b1121ee6"
+    },
+    {
+      "defaultBranchRef": {
+        "name": "master"
+      },
+      "name": "lpex-trading-core",
+      "pushedAt": "2026-10-30T02:49:11Z",
+      "url": "https://github.com/remitano/lpex-trading-core",
+      "snapshot_commit_prefix": "138dfcd1cfaae845ef0f2a77a934c58011129b45"
+    },
+    {
+      "defaultBranchRef": {
+        "name": "main"
+      },
+      "name": "dax-bot-service",
+      "pushedAt": "2026-10-27T11:53:47Z",
+      "url": "https://github.com/remitano/dax-bot-service",
+      "snapshot_commit_prefix": "99acdecbdbe1ea01c73d9c6fdf1b21ee3c17a4b2"
+    },
+    {
+      "defaultBranchRef": {
+        "name": "master"
+      },
+      "name": "lpex-bankgw-simulation",
+      "pushedAt": "2026-10-22T11:44:39Z",
+      "url": "https://github.com/remitano/lpex-bankgw-simulation",
+      "snapshot_commit_prefix": "2d7f1aa8c73f5f26a9b2e9a185cbf0330990c6db"
+    },
+    {
+      "defaultBranchRef": {
+        "name": "master"
+      },
+      "name": "dax-admin",
+      "pushedAt": "2026-10-21T07:08:08Z",
+      "url": "https://github.com/remitano/dax-admin",
+      "snapshot_commit_prefix": "dea082c71bc7e6e21d2d535e68e2ba5ee37817b6"
+    },
+    {
+      "defaultBranchRef": {
+        "name": "master"
+      },
+      "name": "dax-portal-connectors",
+      "pushedAt": "2026-10-20T07:25:34Z",
+      "url": "https://github.com/remitano/dax-portal-connectors",
+      "snapshot_commit_prefix": "6ced370e826cd47bbba331638721d3e5186a5814"
+    },
+    {
+      "defaultBranchRef": {
+        "name": "master"
+      },
+      "name": "dax-signer",
+      "pushedAt": "2026-10-12T07:24:52Z",
+      "url": "https://github.com/remitano/dax-signer",
+      "snapshot_commit_prefix": "cf0cf850df1ada68c0c3c0ed7f273aa914b3fd2c"
+    },
+    {
+      "defaultBranchRef": {
+        "name": "master"
+      },
+      "name": "dax-ruby-signer",
+      "pushedAt": "2026-04-06T11:09:46Z",
+      "url": "https://github.com/remitano/dax-ruby-signer",
+      "snapshot_commit_prefix": "34795cb1e7c4ab206aecdc8543cc5f676122dd08"
+    },
+    {
+      "defaultBranchRef": {
+        "name": "master"
+      },
+      "name": "dax-kyc-sdk",
+      "pushedAt": "2026-03-12T09:52:33Z",
+      "url": "https://github.com/remitano/dax-kyc-sdk",
+      "snapshot_commit_prefix": "f78b897631a30070fb7315a6c2e4fe559306b569"
+    },
+    {
+      "defaultBranchRef": {
+        "name": "master"
+      },
+      "name": "dax-liveness-detection",
+      "pushedAt": "2026-03-01T01:43:43Z",
+      "url": "https://github.com/remitano/dax-liveness-detection",
+      "snapshot_commit_prefix": "249bd8422392495a2a4806324b48c10ab743165a"
+    },
+    {
+      "defaultBranchRef": {
+        "name": "master"
+      },
+      "name": "dax-external-liquidity-balance-manager",
+      "pushedAt": "2026-01-22T03:50:30Z",
+      "url": "https://github.com/remitano/dax-external-liquidity-balance-manager",
+      "snapshot_commit_prefix": "a7e381e155c4d321087b6c52ae678c8dece73aed"
+    }
+  ]
+}

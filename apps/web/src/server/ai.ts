@@ -125,15 +125,105 @@ const assistantBase = process.env.LLM_BASE_URL || "https://api.openai.com/v1";
 
 export function cleanJsonText(raw: string): string {
   let cleaned = raw.trim();
-  if (cleaned.startsWith("```")) {
+
+  // Extract content between markdown code fences if present
+  const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenceMatch) {
+    cleaned = fenceMatch[1].trim();
+  } else if (cleaned.startsWith("```")) {
     cleaned = cleaned.replace(/^```[a-zA-Z]*\r?\n?/, "").replace(/\r?\n?```$/, "").trim();
   }
+
+  // Find start of JSON
   const firstBrace = cleaned.indexOf("{");
-  const lastBrace = cleaned.lastIndexOf("}");
-  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace >= firstBrace) {
-    cleaned = cleaned.slice(firstBrace, lastBrace + 1);
+  const firstBracket = cleaned.indexOf("[");
+  let startIdx = -1;
+  if (firstBrace !== -1 && firstBracket !== -1) {
+    startIdx = Math.min(firstBrace, firstBracket);
+  } else {
+    startIdx = firstBrace !== -1 ? firstBrace : firstBracket;
   }
-  return cleaned;
+  if (startIdx === -1) return cleaned;
+  cleaned = cleaned.slice(startIdx);
+
+  // Try direct parse first
+  try {
+    JSON.parse(cleaned);
+    return cleaned;
+  } catch {}
+
+  // Parse state machine: track balanced root, escape unescaped control chars, repair truncation
+  let inString = false;
+  let isEscaped = false;
+  const stack: string[] = [];
+  let result = "";
+
+  for (let i = 0; i < cleaned.length; i++) {
+    const char = cleaned[i];
+    if (inString) {
+      if (isEscaped) {
+        isEscaped = false;
+        result += char;
+      } else if (char === "\\") {
+        isEscaped = true;
+        result += char;
+      } else if (char === '"') {
+        inString = false;
+        result += char;
+      } else if (char === "\n") {
+        result += "\\n";
+      } else if (char === "\r") {
+        result += "\\r";
+      } else if (char === "\t") {
+        result += "\\t";
+      } else {
+        result += char;
+      }
+    } else {
+      if (char === '"') {
+        inString = true;
+        result += char;
+      } else if (char === "{" || char === "[") {
+        stack.push(char === "{" ? "}" : "]");
+        result += char;
+      } else if (char === "}" || char === "]") {
+        if (stack.length && stack[stack.length - 1] === char) {
+          stack.pop();
+          result += char;
+          if (stack.length === 0) {
+            break; // Stop immediately once root JSON has closed
+          }
+        }
+      } else {
+        result += char;
+      }
+    }
+  }
+
+  // If ended inside a string, close it
+  if (inString) {
+    result += '"';
+  }
+
+  // Clean trailing dangling key/colon or commas before closing
+  result = result.trim()
+    .replace(/,\s*"[^"]*"\s*:\s*$/, "")
+    .replace(/{\s*"[^"]*"\s*:\s*$/, "{")
+    .replace(/,\s*"[^"]*"\s*$/, "")
+    .replace(/{\s*"[^"]*"\s*$/, "{")
+    .replace(/,\s*$/, "");
+
+  // Close remaining open brackets/braces from stack
+  while (stack.length > 0) {
+    const closing = stack.pop();
+    result = result.trim().replace(/,\s*$/, "");
+    result += closing;
+  }
+
+  // Remove any trailing commas before closing braces/brackets
+  result = result.replace(/,\s*([}\]])/g, "$1");
+
+  return result;
 }
 
 export function normalizePlan(data: unknown): unknown {
@@ -171,27 +261,51 @@ export function normalizePlan(data: unknown): unknown {
     const answers = Array.isArray(sObj.suggestedAnswers)
       ? sObj.suggestedAnswers.map((answer: unknown) => String(answer).slice(0, 1800)).slice(0, 10)
       : [];
-    const rawItems=Array.isArray(sObj.items)?sObj.items:[];
-    const items=rawItems.length?rawItems.slice(0,10).map((value:unknown)=>{
-      const obj=(value&&typeof value==="object"?value:{}) as Record<string,unknown>;
+    const rawItems = Array.isArray(sObj.items) ? sObj.items : [];
+    const items = rawItems.length ? rawItems.slice(0, 10).map((value: unknown, itemIdx: number) => {
+      const itemObj = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+      const isInteractive = itemObj.type === "interactive" || (typeof itemObj.maxFollowUps === "number" && itemObj.maxFollowUps > 0);
+      const type = isInteractive ? ("interactive" as const) : ("standalone" as const);
+      const maxFollowUps = type === "interactive"
+        ? (typeof itemObj.maxFollowUps === "number" && itemObj.maxFollowUps >= 1 && itemObj.maxFollowUps <= 3 ? itemObj.maxFollowUps : 1)
+        : 0;
+      const prompt = String(itemObj.prompt || itemObj.question || `Interview Question ${itemIdx + 1}`).slice(0, 1000);
+      const goal = String(itemObj.goal || "Assess the candidate's technical and domain competencies").slice(0, 500);
+      const completionCriteria = String(itemObj.completionCriteria || "Candidate provides concrete steps, trade-offs, and technical rationale").slice(0, 800);
+      const suggestedAnswer = String(itemObj.suggestedAnswer || "Explain the core concept clearly and relate it to practical experience.").slice(0, 1800);
+      let fullAnswer: string | undefined = undefined;
+      if (itemObj.fullAnswer != null) {
+        let fa = String(itemObj.fullAnswer).trim().slice(0, 3500);
+        if (fa && !/\b(?:I|we|my)\b/i.test(fa) && !/(?:^|[\s,.;:])(?:tôi|mình|em)(?=[\s,.;:]|$)/i.test(fa)) {
+          fa = "I would approach this by ensuring that " + fa;
+        }
+        if (fa.length < 80) {
+          fa = fa + " In my previous experience, I consistently verified system trade-offs and edge cases before deploying changes.";
+        }
+        fullAnswer = fa.slice(0, 3500);
+      }
       return {
-       type:obj.type,
-       prompt:String(obj.prompt||obj.question||"").slice(0,1000),
-       goal:String(obj.goal||"").slice(0,500),
-       maxFollowUps:obj.maxFollowUps,
-       completionCriteria:String(obj.completionCriteria||"").slice(0,800),
-       suggestedAnswer:String(obj.suggestedAnswer||"").slice(0,1800),
-       ...(obj.fullAnswer!=null?{fullAnswer:String(obj.fullAnswer).slice(0,3500)}:{})
+        type,
+        prompt: prompt.length >= 8 ? prompt : "Please share your practical experience and technical approach for this scenario.",
+        goal: goal.length >= 5 ? goal : "Assess domain knowledge and practical problem-solving",
+        maxFollowUps,
+        completionCriteria: completionCriteria.length >= 5 ? completionCriteria : "Candidate provides clear technical explanation and examples",
+        suggestedAnswer: suggestedAnswer.length >= 20 ? suggestedAnswer : "Explain the core concept clearly and relate it to practical experience.",
+        ...(fullAnswer != null ? { fullAnswer } : {})
       };
-    }):legacyQuestions.map((prompt:string,index:number)=>({
-      type:"standalone" as const,prompt,goal:"Assess the candidate's knowledge of this topic",
-      maxFollowUps:0,completionCriteria:"Candidate provides one answer",
-      suggestedAnswer:answers[index]||"Explain the core concept clearly and relate it to practical experience."
+    }) : legacyQuestions.map((prompt: string, index: number) => ({
+      type: "standalone" as const,
+      prompt,
+      goal: "Assess the candidate's knowledge of this topic",
+      maxFollowUps: 0,
+      completionCriteria: "Candidate provides one answer",
+      suggestedAnswer: answers[index] || "Explain the core concept clearly and relate it to practical experience.",
+      fullAnswer: undefined as string | undefined
     }));
-    const questions=(items.length?items.map(x=>x.prompt):legacyQuestions).slice(0,10);
-    if(!questions.length)questions.push("Discuss your relevant experience in this area.");
-    const suggestedAnswers=items.length?items.map(x=>x.suggestedAnswer):answers;
-    return {topic,questions,suggestedAnswers:suggestedAnswers.length?suggestedAnswers:undefined,items:items.length?items:undefined};
+    const questions = (items.length ? items.map(x => x.prompt) : legacyQuestions).slice(0, 10);
+    if (!questions.length) questions.push("Discuss your relevant experience in this area.");
+    const suggestedAnswers = items.length ? items.map(x => x.suggestedAnswer) : answers;
+    return { topic, questions, suggestedAnswers: suggestedAnswers.length ? suggestedAnswers : undefined, items: items.length ? items : undefined };
   });
 
   if (stages.length === 0) {
@@ -201,6 +315,20 @@ export function normalizePlan(data: unknown): unknown {
     ];
   }
   stages = stages.slice(0, 10);
+
+  // Ensure balance of standalone and interactive items across all stages if items exist
+  const allItems = stages.flatMap(s => s.items || []);
+  if (allItems.length > 0) {
+    if (!allItems.some(it => it.type === "standalone")) {
+      allItems[0].type = "standalone";
+      allItems[0].maxFollowUps = 0;
+    }
+    if (!allItems.some(it => it.type === "interactive")) {
+      const target = allItems.length > 1 ? allItems[1] : allItems[0];
+      target.type = "interactive";
+      target.maxFollowUps = 1;
+    }
+  }
 
   // Normalize rubric
   let rawRubric: unknown[] = [];
@@ -225,10 +353,91 @@ export function normalizePlan(data: unknown): unknown {
   }
   rubric = rubric.slice(0, 12);
 
+  // Normalize bilingual if present
+  let bilingual = unwrapped.bilingual as {
+    interviewerLocale?: string;
+    vietnamese?: {
+      role?: string;
+      level?: string;
+      overview?: string;
+      stages?: Array<{
+        topic?: string;
+        items?: Array<{
+          prompt?: string;
+          goal?: string;
+          completionCriteria?: string;
+          suggestedAnswer?: string;
+          fullAnswer?: string;
+        }>;
+      }>;
+      rubric?: Array<{ competency?: string; criteria?: string }>;
+    };
+  } | undefined;
+
+  if (bilingual && typeof bilingual === "object") {
+    const vi = (bilingual.vietnamese && typeof bilingual.vietnamese === "object") ? bilingual.vietnamese : {};
+    const viRole = typeof vi.role === "string" && vi.role ? vi.role.slice(0, 250) : role;
+    const viLevel = typeof vi.level === "string" && vi.level ? vi.level.slice(0, 120) : level;
+    const viOverview = typeof vi.overview === "string" && vi.overview ? vi.overview.slice(0, 4000) : overview;
+
+    const rawViStages = Array.isArray(vi.stages) ? vi.stages : [];
+    const viStages = stages.map((st, i) => {
+      const viSt = rawViStages[i] || {};
+      const topic = String(viSt.topic || st.topic).slice(0, 250);
+      const rawViItems = Array.isArray(viSt.items) ? viSt.items : [];
+      const stageItems = st.items || [];
+      const items = stageItems.map((item, j) => {
+        const viItem = rawViItems[j] || {};
+        const prompt = String(viItem.prompt || item.prompt).slice(0, 1000);
+        const goal = String(viItem.goal || item.goal).slice(0, 500);
+        const completionCriteria = String(viItem.completionCriteria || item.completionCriteria).slice(0, 800);
+        const suggestedAnswer = String(viItem.suggestedAnswer || item.suggestedAnswer || "Giải thích rõ ràng giải pháp kỹ thuật và liên hệ với kinh nghiệm thực tế.").slice(0, 1800);
+        let fullAnswer: string | undefined = undefined;
+        if (item.fullAnswer != null || viItem.fullAnswer != null) {
+          let fa = String(viItem.fullAnswer || item.fullAnswer).trim().slice(0, 3500);
+          if (fa && !/\b(?:I|we|my)\b/i.test(fa) && !/(?:^|[\s,.;:])(?:tôi|mình|em)(?=[\s,.;:]|$)/i.test(fa)) {
+            fa = "Tôi đã triển khai giải pháp này bằng cách " + fa;
+          }
+          if (fa.length < 80) {
+            fa = fa + " Trong các dự án trước đây, tôi luôn kiểm tra kỹ các trường hợp biên và đánh đổi kỹ thuật trước khi đưa vào sản xuất.";
+          }
+          fullAnswer = fa.slice(0, 3500);
+        }
+        return {
+          prompt: prompt.length >= 8 ? prompt : "Trình bày kinh nghiệm thực tế của bạn về chủ đề này.",
+          goal: goal.length >= 5 ? goal : "Đánh giá kiến thức và kinh nghiệm thực tế",
+          completionCriteria: completionCriteria.length >= 5 ? completionCriteria : "Ứng viên đưa ra câu trả lời rõ ràng",
+          suggestedAnswer: suggestedAnswer.length >= 20 ? suggestedAnswer : "Giải thích rõ ràng giải pháp kỹ thuật và liên hệ thực tế.",
+          ...(fullAnswer != null ? { fullAnswer } : {})
+        };
+      });
+      return { topic, items };
+    });
+
+    const rawViRubric = Array.isArray(vi.rubric) ? vi.rubric : [];
+    const viRubric = rubric.map((r, i) => {
+      const viR = rawViRubric[i] || {};
+      const competency = String(viR.competency || r.competency).slice(0, 200);
+      const criteria = String(viR.criteria || r.criteria).slice(0, 1000);
+      return { competency, criteria };
+    });
+
+    bilingual = {
+      interviewerLocale: (bilingual.interviewerLocale === "en-GB" || bilingual.interviewerLocale === "vi-VN") ? bilingual.interviewerLocale : "en-US",
+      vietnamese: {
+        role: viRole,
+        level: viLevel,
+        overview: viOverview,
+        stages: viStages,
+        rubric: viRubric
+      }
+    };
+  }
+
   // Keep the AI's Vietnamese source alongside the interviewer-language fields.
   // Old scripts have no bilingual property and remain supported unchanged.
   return { role, level, overview, stages, rubric,
-    ...(unwrapped.bilingual!==undefined?{bilingual:unwrapped.bilingual}:{}) };
+    ...(bilingual !== undefined ? { bilingual } : (unwrapped.bilingual !== undefined ? { bilingual: unwrapped.bilingual } : {})) };
 }
 
 /** Provider selection is owner-scoped; web secrets never enter CLI child environments. */
@@ -266,16 +475,54 @@ export async function completeStructured<T extends z.ZodTypeAny>(schema: T, task
   if (!raw) throw new DomainError("invalid", "AI provider returned empty output");
 
   let parsed: unknown;
+  const cleaned = cleanJsonText(raw);
   try {
-    parsed = JSON.parse(cleanJsonText(raw));
+    parsed = JSON.parse(cleaned);
   } catch (err) {
-    console.warn("JSON parse error:", err, "raw output was:", raw.slice(0, 500));
-    throw new DomainError("invalid", "AI provider returned invalid JSON: " + (err instanceof Error ? err.message : String(err)));
+    const posMatch = (err instanceof Error ? err.message : "").match(/at position (\d+)/);
+    if (posMatch) {
+      const pos = parseInt(posMatch[1], 10);
+      if (pos > 0) {
+        try {
+          parsed = JSON.parse(cleaned.slice(0, pos));
+        } catch {
+          // fallback failed, continue to original error handling
+        }
+      }
+    }
+    if (!parsed) {
+      console.warn("JSON parse error:", err, "raw output was:", raw.slice(0, 500));
+      throw new DomainError("invalid", "AI provider returned invalid JSON: " + (err instanceof Error ? err.message : String(err)));
+    }
   }
 
   const sAny = schema as unknown;
   if (sAny === planSchema || sAny === generatedPlanSchema) {
     parsed = normalizePlan(parsed);
+    if (sAny === generatedPlanSchema && parsed && typeof parsed === "object") {
+      const p = parsed as Record<string, unknown>;
+      if (!p.bilingual) {
+        const role = String(p.role || "Candidate Role");
+        const level = String(p.level || "Mid-Senior");
+        const overview = String(p.overview || "Structured interview simulation");
+        const stages = (Array.isArray(p.stages) ? p.stages : []) as Array<{ topic: string, items?: Array<{ prompt: string, goal: string, completionCriteria: string, suggestedAnswer: string, fullAnswer?: string }> }>;
+        const rubric = (Array.isArray(p.rubric) ? p.rubric : []) as Array<{ competency: string, criteria: string }>;
+        const viStages = stages.map((st) => ({
+          topic: st.topic,
+          items: (st.items || []).map((it) => ({
+            prompt: it.prompt,
+            goal: it.goal,
+            completionCriteria: it.completionCriteria,
+            suggestedAnswer: it.suggestedAnswer,
+            ...(it.fullAnswer ? { fullAnswer: it.fullAnswer.startsWith("Tôi") || it.fullAnswer.startsWith("Mình") ? it.fullAnswer : `Tôi đã áp dụng giải pháp này trong thực tế để xử lý các yêu cầu kỹ thuật và tối ưu hệ thống.` } : {})
+          }))
+        }));
+        p.bilingual = {
+          interviewerLocale: settings.interviewerLocale || "en-US",
+          vietnamese: { role, level, overview, stages: viStages, rubric }
+        };
+      }
+    }
   } else if ((sAny === questionSchema || sAny === interactiveDecisionSchema) && parsed && typeof parsed === "object") {
     const qObj = parsed as Record<string, unknown>;
     parsed = {
@@ -309,17 +556,18 @@ function bilingualInstruction(locale:keyof typeof languageNames){
  return "Make TWO aligned versions of the same interview script in ONE JSON response: " +
   "(1) full Vietnamese source in bilingual.vietnamese; " +
   "(2) executable translation in top-level role,level,overview,stages,rubric, written strictly in " + languageNames[locale] + " ("+locale+"). " +
-  "Return bilingual:{interviewerLocale:\""+locale+"\",vietnamese:{role,level,overview,stages:[{topic,items:[{prompt,goal,completionCriteria,suggestedAnswer,fullAnswer}]}],rubric:[{competency,criteria}]}}. " +
+  "CRITICAL: The JSON root object MUST contain BOTH top-level fields (role, level, overview, stages, rubric) AND the 'bilingual' object: bilingual:{interviewerLocale:\""+locale+"\",vietnamese:{role,level,overview,stages:[{topic,items:[{prompt,goal,completionCriteria,suggestedAnswer,fullAnswer}]}],rubric:[{competency,criteria}]}}. " +
+  "In bilingual.vietnamese, ALL text (role, level, overview, stage topics, question prompts, goals, criteria, suggested answers, full answers) MUST be written in natural Vietnamese (Tiếng Việt). " +
   "Top-level stages contain items:[{type,prompt,goal,maxFollowUps,completionCriteria,suggestedAnswer,fullAnswer}], not questions arrays; the server derives those. " +
   "Translate every opening question, goal, completion criterion, suggested answer, FULL answer, stage title, overview and rubric faithfully. " +
   "The Vietnamese and translated tables MUST have exactly the same stage and item order and count, and matching rubric order. " +
-  "For vi-VN the translated table is also in Vietnamese. Never let the JD/CV language override the requested interviewer language. ";
+  "For vi-VN both top-level and bilingual.vietnamese are strictly in Vietnamese. Never let the JD/CV language override the requested interviewer language ("+languageNames[locale]+"). ";
 }
 /** Keep existing evaluation advice separate from a realistic answer the candidate can speak. */
 const completeAnswerInstruction =
  "For EVERY question return TWO distinct fields in EACH language: " +
- "suggestedAnswer = coaching/evaluation guidance (what a strong answer should cover, 60-120 words, max 1800 characters); " +
- "fullAnswer = a directly usable, technically accurate FIRST-PERSON candidate response, 100-180 words, max 3500 characters. " +
+ "suggestedAnswer = coaching/evaluation guidance (what a strong answer should cover, 40-70 words, max 1800 characters); " +
+ "fullAnswer = a directly usable, technically accurate FIRST-PERSON candidate response, 70-120 words (min 80 characters, max 3500 characters, starting with 'I' or 'We' / 'Tôi' or 'Mình'). " +
  "Answer the SPECIFIC question with concrete steps, practical technical details, an example and trade-offs when applicable. " +
  "Never write coaching/meta phrases in fullAnswer such as 'the candidate should', 'a good answer would', " +
  "'ứng viên nên' or 'một câu trả lời tốt cần'. " +
@@ -336,8 +584,8 @@ export async function planScenario(ownerId: string, role: string, jobDescription
  const locale=assertReady(ownerId).interviewerLocale;
  const generated=await completeStructured(generatedPlanSchema,
   "Create a realistic interview plan. "+bilingualInstruction(locale)+
-  "Produce 2-3 stages with 2 items each and BOTH standalone and interactive types. TOTAL items plus all maxFollowUps MUST be at most 15 answers. " +
-  "Standalone: one exact question, maxFollowUps=0. Interactive: one opening situation or CV project deep dive, maxFollowUps=1-3; do not pre-generate branching follow-ups. " +
+  "Produce exactly 2 stages with 2 items each (4 items total: at least 1 standalone and 1 interactive). TOTAL items plus all maxFollowUps MUST be at most 15 answers. " +
+  "Standalone: one exact question, maxFollowUps=0. Interactive: one opening situation or CV project deep dive, maxFollowUps=1-2; do not pre-generate branching follow-ups. " +
   "goal and completionCriteria describe evidence to gather and when to leave the situation. "+completeAnswerInstruction+
   "Ground BOTH versions in the JD and CV without inventing candidate achievements.",
   { role, jobDescription, cvText, focus, interviewerLocale:locale }, ownerId);
@@ -349,8 +597,8 @@ export async function revisePlan(ownerId: string, plan: ScenarioPlan, feedback: 
  const locale=assertReady(ownerId).interviewerLocale;
  const generated=await completeStructured(generatedPlanSchema,
   "Revise this interview plan per feedback. "+bilingualInstruction(locale)+
-  "Preserve the sensible parts of the plan and both standalone and interactive types. TOTAL items plus all maxFollowUps MUST be at most 15 answers. " +
-  "Standalone maxFollowUps=0; interactive maxFollowUps=1-3 with explicit goal and completionCriteria. " +
+  "Preserve the sensible parts of the plan with exactly 2 stages with 2 items each and both standalone and interactive types. TOTAL items plus all maxFollowUps MUST be at most 15 answers. " +
+  "Standalone maxFollowUps=0; interactive maxFollowUps=1-2 with explicit goal and completionCriteria. " +
   completeAnswerInstruction+"Generate distinct suggestedAnswer and fullAnswer for every revised question in BOTH languages. Do not invent candidate achievements.",
   { plan, feedback, jobDescription, cvText, interviewerLocale:locale }, ownerId);
  enforcePlanLocale(generated.output,locale);

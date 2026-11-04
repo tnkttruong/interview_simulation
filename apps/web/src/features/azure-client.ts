@@ -20,17 +20,34 @@ export function loadAzureSdk():Promise<SDK>{
  return loading;
 }
 export interface SpeechCredential{token:string;region:string;}
-export async function say(text:string,voiceId:string,credential:SpeechCredential){
+export async function say(text:string,voiceId:string,credential:SpeechCredential,speed:number=1.0){
  const sdk=await loadAzureSdk();
  const cfg=sdk.SpeechConfig.fromAuthorizationToken(credential.token,credential.region);
  cfg.speechSynthesisVoiceName=voiceId;
  const speaker=sdk.AudioConfig.fromDefaultSpeakerOutput();
  const synth=new sdk.SpeechSynthesizer(cfg,speaker);
  try{
-  await new Promise<void>((resolve,reject)=>synth.speakTextAsync(text,(result:{reason:number})=>{
-   if(result.reason===sdk.ResultReason.SynthesizingAudioCompleted)resolve();
-   else reject(new Error("TTS synthesis failed"));
-  },(error:string)=>reject(new Error(String(error)))));
+  if(speed&&speed!==1.0){
+   const escaped=text
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&apos;");
+   const lang=voiceId.split("-").slice(0,2).join("-")||"en-US";
+   const percent=Math.round((speed-1)*100);
+   const rate=percent>=0?`+${percent}%`:`${percent}%`;
+   const ssml=`<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${lang}"><voice name="${voiceId}"><prosody rate="${rate}">${escaped}</prosody></voice></speak>`;
+   await new Promise<void>((resolve,reject)=>synth.speakSsmlAsync(ssml,(result:{reason:number})=>{
+    if(result.reason===sdk.ResultReason.SynthesizingAudioCompleted)resolve();
+    else reject(new Error("TTS synthesis failed"));
+   },(error:string)=>reject(new Error(String(error)))));
+  }else{
+   await new Promise<void>((resolve,reject)=>synth.speakTextAsync(text,(result:{reason:number})=>{
+    if(result.reason===sdk.ResultReason.SynthesizingAudioCompleted)resolve();
+    else reject(new Error("TTS synthesis failed"));
+   },(error:string)=>reject(new Error(String(error)))));
+  }
  }finally{synth.close();}
 }
 export async function listen(locale:string,credential:SpeechCredential){

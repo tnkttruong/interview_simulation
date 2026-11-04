@@ -14,6 +14,7 @@ export const voiceByLocale = {
 export const speechConfigSchema = z.object({
   interviewerLocale: z.enum(supportedLocales),
   interviewerVoiceId: z.string().min(1),
+  interviewerSpeed: z.number().min(0.5).max(2.0).optional().default(1.0),
   candidateSttLocale: z.enum(supportedLocales),
   consentToTranscript: z.literal(true),
 });
