@@ -4,45 +4,47 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AUDIO_SAMPLES, type AudioSampleId } from "@/shared/audio-samples";
 
-type DiagnosticStatus = { enabled: boolean; azure: { configured: boolean } };
 export default function SampleAudioPlayer({ email }: { email: string }) {
-  const [status, setStatus] = useState<DiagnosticStatus | null>(null);
   const [error, setError] = useState("");
   const [pending, setPending] = useState<AudioSampleId | null>(null);
   const [selected, setSelected] = useState<AudioSampleId | null>(null);
   const [audioUrl, setAudioUrl] = useState("");
   const [playing, setPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const urlRef = useRef<string | null>(null);
+  // Each fixed sample is synthesized at most once per mounted page.
+  // URLs are intentionally not persisted: refresh => fresh Azure TTS request on next Play.
+  const audioCache = useRef<Map<AudioSampleId, string>>(new Map());
+  const [cacheRevision, setCacheRevision] = useState(0);
   const mounted = useRef(true);
 
   useEffect(() => {
     mounted.current = true;
     const playback = audioRef.current;
-    fetch("/api/me/provider-tests", { credentials: "same-origin", cache: "no-store" })
-      .then(async response => {
-        const data = await response.json() as DiagnosticStatus & { error?: string };
-        if (!response.ok) throw new Error(data.error || "Cannot check Azure diagnostics");
-        if (mounted.current) setStatus(data);
-      }).catch(err => { if (mounted.current) setError(String(err)); });
+    const cache = audioCache.current;
     return () => {
       mounted.current = false;
       playback?.pause();
-      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-      urlRef.current = null;
+      for (const url of cache.values()) URL.revokeObjectURL(url);
+      cache.clear();
     };
   }, []);
 
   async function playSample(id: AudioSampleId) {
     if (pending) return;
     setError("");
-    const player = audioRef.current;
-    player?.pause();
-    if (selected === id && audioUrl) {
-      if (player) {
+    audioRef.current?.pause();
+    const cachedUrl = audioCache.current.get(id);
+    if (cachedUrl) {
+      setSelected(id);
+      setAudioUrl(cachedUrl);
+      requestAnimationFrame(() => {
+        if (!mounted.current) return;
+        const player = audioRef.current;
+        if (!player) return;
         player.currentTime = 0;
-        await player.play().catch(() => setError("Chrome blocked auto-play; click Play in the audio player below."));
-      }
+        void player.play().catch(() =>
+          setError("Chrome blocked playback; click Play in the audio controls below."));
+      });
       return;
     }
     setPending(id);
@@ -59,8 +61,8 @@ export default function SampleAudioPlayer({ email }: { email: string }) {
       const blob = await response.blob();
       if (!mounted.current) return;
       const url = URL.createObjectURL(blob);
-      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-      urlRef.current = url;
+      audioCache.current.set(id, url);
+      setCacheRevision(count => count + 1);
       setAudioUrl(url);
       setSelected(id);
       requestAnimationFrame(() => {
@@ -98,9 +100,7 @@ export default function SampleAudioPlayer({ email }: { email: string }) {
           <p>3. On the capture page click <strong>Start Azure STT</strong>, and set interviewer recognition language to match the sample.</p>
           <p>4. Return here and press Play below. Verify the <strong>Interviewer · Chrome Tab</strong> meter and its live transcript change in the capture page.</p>
           <p className="muted small">Azure TTS sample output is played by an HTML audio element in this tab, not by the operating system&apos;s speechSynthesis. This makes it appropriate for Chrome tab audio capture.</p>
-          {status && (!status.enabled || !status.azure.configured) && <p className="alert info">
-            Configure AZURE_SPEECH_KEY, AZURE_SPEECH_REGION and ENABLE_PROVIDER_TESTS=true on the local web server, then restart it to enable playback.
-          </p>}
+          <p className="muted small">Play calls Azure Text-to-Speech once per sample. Replays use an in-memory cache; refreshing the page clears it. Azure credentials must be configured on the server, and errors appear below instead of disabling Play.</p>
           {error && <p role="alert" className="alert error">{error}</p>}
         </section>
         <section className="panel">
@@ -113,14 +113,14 @@ export default function SampleAudioPlayer({ email }: { email: string }) {
                   <strong>{sample.title}</strong>
                   <p className="muted small" style={{ marginTop: 8 }}>{sample.text}</p>
                 </div>
-                <button className="btn primary" disabled={!!pending || !status?.enabled || !status.azure.configured}
+                <button className="btn primary" disabled={!!pending}
                   onClick={() => void playSample(sample.id)}>
-                  {pending === sample.id ? "Generating…" : selected === sample.id ? "Replay" : "▶ Play"}
+                  {pending === sample.id ? "Generating…" : audioCache.current.has(sample.id) ? "↻ Replay (cached)" : "▶ Play"}
                 </button>
               </div>
             </div>)}
           </div>
-          <p className="muted small">Each new sample is synthesized using Azure TTS and may incur a small charge. Replaying the loaded sample does not call Azure again.</p>
+          <p className="muted small">Azure TTS is called on first Play for each clip. {cacheRevision >= 0 ? audioCache.current.size : 0} sample(s) cached in this tab; refresh clears the cache and the next Play calls Azure again. Azure usage charges may apply.</p>
         </section>
         <section className="panel">
           <h2>Audio playback</h2>
